@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eaeaea"/>
+      <stop offset="0.55" stop-color="#c9c9cd"/>
+      <stop offset="1" stop-color="#97979b"/>
+    </linearGradient>
+  </defs>
+  <!-- iOS 风格 squircle 底板（圆角约占边长 22%） -->
+  <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
+
+  <!-- AirPlay 标志：上方三道同心弧（圆心 256,280；sweep=1 保证弧开口朝下呈 ∩ 形）
+       + 下方实心三角（广播塔），整体垂直居中于 512 -->
+  <g fill="none" stroke="#1c1c1e" stroke-width="26" stroke-linecap="round">
+    <path d="M195 245 A 70 70 0 0 1 317 245"/>
+    <path d="M161 225 A 110 110 0 0 1 351 225"/>
+    <path d="M126 205 A 150 150 0 0 1 386 205"/>
+  </g>
+  <path d="M256 298 L318 382 L194 382 Z" fill="#1c1c1e"/>
+</svg>
