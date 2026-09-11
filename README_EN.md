@@ -98,4 +98,4 @@ Building must happen on x86_64 Linux (the AppImage toolchain is Linux-only and c
 
 ## License
 
-This program is released under the MIT License. Note: the bundled mirroring engine [UxPlay](https://github.com/FDH2/UxPlay) is GPL-3.0, and runtime dependencies such as PyQt6 and GStreamer are covered by their own open-source licenses (GPL-3.0 / LGPL).
+This program is released under the MIT License. Note: the bundled mirroring engine [UxPlay](https://github.com/FDH2/UxPlay) is GPL-3.0, and runtime dependencies such as PySide6 (LGPL v3) and GStreamer (LGPL) are covered by their own open-source licenses.

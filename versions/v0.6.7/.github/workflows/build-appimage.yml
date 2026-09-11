@@ -1,0 +1,105 @@
+name: Build AirPlay Deck AppImage
+
+# 在 GitHub 的 x86_64 Linux runner 上自动构建 AppImage，
+# 无需本地 Linux / Docker / macOS。构建完成后：
+#   · Actions 页面的 Artifacts 里可下载（保留 90 天）；
+#   · 同时自动发布/更新一个正式 Release，把 AppImage 直接挂在里面——
+#     想拿到文件时去 Releases 页点一下最省事，不用解压 artifact zip。
+on:
+  workflow_dispatch:        # 允许在 GitHub 网页手动触发
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    # 宿主固定 24.04（长期支持），但真正的构建在下面的 ubuntu:22.04 容器里跑。
+    # 为什么绕这一下：AppImage 会打包**构建机上的 python 解释器**，它链接构建机的 glibc。
+    #   · 在 glibc 2.39 的 24.04 上直接构建 → 拿到较老的 SteamOS 上会报 GLIBC_2.39 not found；
+    #   · 在 glibc 2.35 的 22.04 上构建 → 向前兼容，且与 README 推荐的 distrobox
+    #     构建容器（ubuntu:22.04）产出完全一致。
+    # 但不直接用 runs-on: ubuntu-22.04 —— 该 runner 标签自 2026-09-17 起进入弃用期
+    # （会出现 24 小时临时不可用窗口），2027-04-17 彻底下线。用 Docker 镜像 ubuntu:22.04
+    # 则不受这个时间表影响，长期可用。
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    steps:
+      # job 容器是个裸 ubuntu，没有 git；checkout 这个 action 依赖容器内有 git，
+      # 所以必须先用普通 run 步骤把它装上（run 步骤不依赖 git，可以放在 checkout 之前）。
+      - name: 准备容器（安装 git，供 checkout 使用）
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装构建依赖
+        run: |
+          # python3 / python3-pip：build-appimage.sh 会把**系统解释器**整体拷进 AppDir，
+          # 所以必须确保容器里有 python3.10（22.04 的系统版本）。libfuse2 是 appimagetool
+          # 直接运行所需；容器里通常没有 /dev/fuse，脚本会自动回退到 --appimage-extract。
+          apt-get install -y -qq --no-install-recommends \
+            python3 python3-pip curl squashfs-tools file patchelf libfuse2 xz-utils
+
+      - name: 构建 AppImage
+        run: |
+          chmod +x build-appimage.sh
+          ./build-appimage.sh
+
+      - name: 上传产物（Actions Artifacts，保留 90 天）
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirPlayDeck-AppImage
+          # 产物名带版本号（AirPlayDeck-<版本号>-x86_64.AppImage），故用通配符匹配
+          path: "AirPlayDeck-*-x86_64.AppImage"
+          if-no-files-found: error
+
+  release:
+    needs: build
+    # 这一步不需要 22.04 容器——只是把文件挂到 Release 上，用宿主 runner 自带的 gh 即可。
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # 创建 release / 上传资产必须有这个权限
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: AirPlayDeck-AppImage
+          path: dist
+
+      - name: 发布 / 更新 prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 这个 job 没有 checkout，工作区里没有 .git，gh 无法靠 git remote 推断仓库，
+          # 必须显式告诉它（否则报 "fatal: not a git repository"）。GH_REPO 对所有 gh 子命令生效。
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(ls dist/AirPlayDeck-*.AppImage | head -n1)
+          VER=$(basename "$APPIMAGE"); VER=${VER#AirPlayDeck-}; VER=${VER%-x86_64.AppImage}
+          TAG="v${VER}"
+          echo "版本：$VER    标签：$TAG    文件：$APPIMAGE"
+          ls -lh "$APPIMAGE"
+
+          cat > /tmp/notes.md <<'EOF'
+          自动构建的正式版本（引擎：UxPlay 1.73.7，GPL-3.0）。
+
+          ## 怎么用
+
+          1. 下载下面的 `.AppImage` 文件
+          2. 直接双击打开即可，无需安装
+          3. 首次启动会自动编译安装运行环境（约 1–3 分钟，需联网）
+          4. 打开后点「开始接收」，在 iPhone / iPad 控制中心「屏幕镜像」选本机
+
+          > 系统要求：x86_64 Linux（SteamOS 已验证），glibc >= 2.35。
+          > 游戏模式（SteamOS 全屏接管）暂未支持，请使用桌面模式。
+          EOF
+
+          # 已存在同名 tag 时 create 会失败，此时改为覆盖上传资产（--clobber）
+          gh release create "$TAG" "$APPIMAGE" \
+            --title "AirPlay Deck ${VER}" \
+            --target "${GITHUB_SHA}" \
+            --notes-file /tmp/notes.md \
+            || gh release upload "$TAG" "$APPIMAGE" --clobber
+
+          echo "发布完成：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
