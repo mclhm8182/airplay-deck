@@ -333,65 +333,57 @@ S: Dict[str, Dict[str, str]] = {
             "把 Steam Deck / Linux 桌面变成 AirPlay 接收端，包装 UxPlay 引擎。\n\n"
             "1. 在「检查与日志」确认容器可用。\n"
             "2. 回主页，打开开关开始接收。\n"
-            "3. iPhone / iPad / Mac 控制中心 → 屏幕镜像 → 选本机名称。\n"
-            "4. 游戏模式：Steam 添加非 Steam 游戏 → 选本 AppImage。\n\n"
-            "游戏模式直接全屏显示投屏画面；投屏结束后会自动回到本界面。"
+            "3. iPhone / iPad 控制中心 → 屏幕镜像 → 选本机名称。\n"
+            "游戏模式（SteamOS 全屏接管）暂未支持，后续版本计划加入；当前请使用桌面模式。"
         ),
         "zh_TW": (
             "把 Steam Deck / Linux 桌面變成 AirPlay 接收端，包裝 UxPlay 引擎。\n\n"
             "1. 在「檢查與日誌」確認容器可用。\n"
             "2. 回主頁，打開開關開始接收。\n"
-            "3. iPhone / iPad / Mac 控制中心 → 螢幕鏡像 → 選本機名稱。\n"
-            "4. 遊戲模式：Steam 加入非 Steam 遊戲 → 選本 AppImage。\n\n"
-            "遊戲模式直接全螢幕顯示鏡像畫面；結束後會自動回到本介面。"
+            "3. iPhone / iPad 控制中心 → 螢幕鏡像 → 選本機名稱。\n"
+            "遊戲模式（SteamOS 全螢幕接管）暫未支援，後續版本計劃加入；目前請使用桌面模式。"
         ),
         "en": (
             "Turn your Steam Deck / Linux desktop into an AirPlay receiver, powered by UxPlay.\n\n"
             "1. Verify the container in Diagnostics.\n"
             "2. Back on Home, flip the switch to start.\n"
-            "3. iPhone / iPad / Mac → Control Center → Screen Mirroring → pick this device.\n"
-            "4. Game mode: add this AppImage as a Non-Steam Game.\n\n"
-            "In game mode the mirrored screen is shown fullscreen; when it ends you are returned to this window."
+            "3. iPhone / iPad → Control Center → Screen Mirroring → pick this device.\n"
+            "Game mode (full-screen takeover on SteamOS) is not supported yet, but planned for a future release; please use desktop mode for now."
         ),
         "ja": (
             "Steam Deck / Linux を AirPlay 受信機にします（UxPlay 使用）。\n\n"
             "1. 「診断」でコンテナを確認。\n"
             "2. ホームに戻り、スイッチをオン。\n"
-            "3. iPhone / iPad / Mac のコントロールセンター → 画面ミラーリング → 本機を選択。\n"
-            "4. ゲームモード：非 Steam ゲームとして本 AppImage を追加。\n\n"
-            "ゲームモードではミラーリング画面を全画面表示し、終了するとこの画面に戻ります。"
+            "3. iPhone / iPad のコントロールセンター → 画面ミラーリング → 本機を選択。\n"
+            "ゲームモード（SteamOS での全画面占有）はまだ未対応です。今後のバージョンで対応予定です。現時点ではデスクトップモードをご利用ください。"
         ),
         "ko": (
             "Steam Deck / Linux 데스크톱을 AirPlay 수신기로 만듭니다(UxPlay 엔진 기반).\n\n"
             "1. '환경 확인 및 로그'에서 컨테이너 사용 가능 확인.\n"
             "2. 홈으로 돌아가 스위치를 켜고 수신 시작.\n"
-            "3. iPhone / iPad / Mac 제어 센터 → 화면 미러링 → 이 기기 선택.\n"
-            "4. 게임 모드: Steam에서 비-Steam 게임으로 추가 → 이 AppImage 선택.\n\n"
-            "게임 모드에서는 미러링 화면이 전체 화면으로 표시되고, 종료되면 이 화면으로 돌아옵니다."
+            "3. iPhone / iPad 제어 센터 → 화면 미러링 → 이 기기 선택.\n"
+            "게임 모드(SteamOS 전체 화면 점유)는 아직 지원되지 않으며, 향후 버전에서 추가할 예정입니다. 현재는 데스크톱 모드를 이용해 주세요."
         ),
         "fr": (
             "Transformez votre Steam Deck / Linux en récepteur AirPlay, via UxPlay.\n\n"
             "1. Vérifiez le conteneur dans Diagnostic.\n"
             "2. De retour à l'accueil, activez pour démarrer.\n"
-            "3. iPhone / iPad / Mac → Centre de contrôle → Mise en miroir → choisissez cet appareil.\n"
-            "4. Mode jeu : ajoutez cette AppImage comme jeu non-Steam.\n\n"
-            "En mode jeu, l'écran est affiché en plein écran ; à la fin, vous revenez à cette fenêtre."
+            "3. iPhone / iPad → Centre de contrôle → Mise en miroir → choisissez cet appareil.\n"
+            "Le mode jeu (prise en charge plein écran sur SteamOS) n'est pas encore pris en charge, mais est prévu pour une version future ; utilisez le mode bureau pour l'instant."
         ),
         "de": (
             "Verwandelt Steam Deck / Linux in einen AirPlay-Empfänger (UxPlay).\n\n"
             "1. Container in Diagnose prüfen.\n"
             "2. Zurück zur Startseite, Schalter aktivieren.\n"
-            "3. iPhone / iPad / Mac → Kontrollzentrum → Bildschirmspiegelung → dieses Gerät.\n"
-            "4. Spielmodus: Diese AppImage als Nicht-Steam-Spiel hinzufügen.\n\n"
-            "Im Spielmodus wird der Bildschirm im Vollbild angezeigt; danach kehren Sie zu diesem Fenster zurück."
+            "3. iPhone / iPad → Kontrollzentrum → Bildschirmspiegelung → dieses Gerät.\n"
+            "Der Spielmodus (Vollbild-Übernahme auf SteamOS) wird noch nicht unterstützt, ist aber für eine künftige Version geplant; nutzen Sie vorerst den Desktop-Modus."
         ),
         "es": (
             "Convierte tu Steam Deck / Linux en un receptor AirPlay con UxPlay.\n\n"
             "1. Verifica el contenedor en Diagnóstico.\n"
             "2. Vuelve al inicio y activa el interruptor.\n"
-            "3. iPhone / iPad / Mac → Centro de control → Pantalla duplicada → elige este dispositivo.\n"
-            "4. Modo juego: añade esta AppImage como juego no-Steam.\n\n"
-            "En modo juego la pantalla se muestra a pantalla completa; al terminar vuelve a esta ventana."
+            "3. iPhone / iPad → Centro de control → Pantalla duplicada → elige este dispositivo.\n"
+            "El modo juego (control de pantalla completa en SteamOS) aún no es compatible, pero está previsto para una versión futura; usa el modo escritorio por ahora."
         ),
     },
 

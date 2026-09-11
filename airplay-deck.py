@@ -818,6 +818,17 @@ class MainWindow(QMainWindow):
         text.setObjectName("hint")
         text.setStyleSheet("color: #cfd1d5; font-size: 12px; line-height: 1.7;")
         cv.addWidget(text)
+        # GitHub 仓库跳转链接（发布者 mclhm8182）
+        gh = QLabel(
+            '<a href="https://github.com/mclhm8182/airplay-deck">'
+            'GitHub: github.com/mclhm8182/airplay-deck</a>'
+        )
+        gh.setObjectName("hint")
+        gh.setOpenExternalLinks(True)
+        gh.setStyleSheet(
+            "color: #58a6ff; font-size: 12px; line-height: 1.7; text-decoration: none;"
+        )
+        cv.addWidget(gh)
         body.addWidget(card)
         body.addStretch(1)
         return page
