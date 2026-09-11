@@ -79,18 +79,43 @@ exit                         # 退出容器
 不需要任何本地 Linux / Docker / macOS 构建。把本仓库推到 GitHub，Actions 在标准 Ubuntu runner 上
 自动跑 `build-appimage.sh` 并产出可下载的 AppImage。
 
+**推上去就会自动构建**（workflow 里配了 `on: push: branches: [main, master]`），不用手动点。
+
+### 一次性准备
+
 1. 在 GitHub 新建一个仓库（如 `airplay-deck`）。
-2. 把本目录所有文件（含 `.github/workflows/build-appimage.yml`）推上去。
-3. 仓库 → Actions → 选 `Build AirPlay Deck AppImage` → `Run workflow`。
-4. 跑完后在 Actions 页面的 **Artifacts** 里下载 `AirPlayDeck-AppImage`（解压后里面是
+2. 把本目录所有文件（含 `.github/workflows/build-appimage.yml`）推上去：
+   ```bash
+   cd airplay-deck
+   git init -b main
+   git add -A && git commit -m "airplay-deck v0.6.0"
+   git remote add origin git@github.com:<你的账号>/airplay-deck.git   # 或 https://github.com/<你的账号>/airplay-deck.git
+   git push -u origin main
+   ```
+   > ⚠️ **用 HTTPS + Personal Access Token 推送时，token 必须勾选 `workflow` 权限**，
+   > 否则含 `.github/workflows/` 的推送会被 GitHub 拒绝（报 `refusing to allow a Personal Access Token
+   > to create or update workflow`）。用 SSH 或 `gh auth login` 则无此问题。
+
+### 拿产物
+
+3. 推完在仓库 → **Actions** → `Build AirPlay Deck AppImage`，等约 2–4 分钟跑完。
+4. 在该次运行的 **Artifacts** 里下载 `AirPlayDeck-AppImage`（解压后里面是
    `AirPlayDeck-<版本号>-x86_64.AppImage`，当前即 `AirPlayDeck-0.6.0-x86_64.AppImage`）。
+
+> 想在网页上手动重跑：Actions → 选左边 `Build AirPlay Deck AppImage` → **Run workflow**。
+
+> **workflow 为什么这样写**：宿主固定 `ubuntu-24.04`（长期支持），但整个构建跑在
+> `container: ubuntu:22.04` 里。因为 AppImage 打包的是**构建机上的** python 解释器，
+> 它链接构建机的 glibc——在 glibc 2.39 的 24.04 上构建，拿到较老的 SteamOS 会报
+> `GLIBC_2.39 not found`；用 22.04 容器（glibc 2.35）则向前兼容，产出与下面路径 1 的
+> distrobox 容器完全一致。不直接写 `runs-on: ubuntu-22.04` 是因为该 runner 标签
+> 自 2026-09-17 起进入弃用期（有 24 小时临时不可用窗口），2027-04-17 彻底下线，
+> 而 Docker 镜像 `ubuntu:22.04` 不受此时间表影响。
 
 > **为什么这条路径值得留着**：AppImage 内嵌的是 **x86_64** 的 Python + PyQt6，只能在
 > x86_64 Linux 上打包。**macOS 无法构建**（AppImage 工具链只有 Linux 版）——尤其苹果芯片
 > （M 系列，arm64）即使装了 Docker，默认也是 arm64 虚拟机，仍需专门开 x86_64 环境。
 > 所以「本地 Mac 直接编译打包」不成立，走这里的云端构建最省事。
-
-（你也可以直接 `git push` 到 `main`/`master` 分支触发。）
 
 ---
 
