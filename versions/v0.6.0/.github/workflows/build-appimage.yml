@@ -70,6 +70,9 @@ jobs:
       - name: 发布 / 更新 prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 这个 job 没有 checkout，工作区里没有 .git，gh 无法靠 git remote 推断仓库，
+          # 必须显式告诉它（否则报 "fatal: not a git repository"）。GH_REPO 对所有 gh 子命令生效。
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           APPIMAGE=$(ls dist/AirPlayDeck-*.AppImage | head -n1)
