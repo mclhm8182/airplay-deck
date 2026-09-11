@@ -98,11 +98,16 @@ exit                         # 退出容器
 
 ### 拿产物
 
-3. 推完在仓库 → **Actions** → `Build AirPlay Deck AppImage`，等约 2–4 分钟跑完。
-4. 在该次运行的 **Artifacts** 里下载 `AirPlayDeck-AppImage`（解压后里面是
-   `AirPlayDeck-<版本号>-x86_64.AppImage`，当前即 `AirPlayDeck-0.6.0-x86_64.AppImage`）。
+3. 推完在仓库 → **Actions** → `Build AirPlay Deck AppImage`，等约 1–2 分钟跑完（两个 job：`build` + `release`）。
 
-> 想在网页上手动重跑：Actions → 选左边 `Build AirPlay Deck AppImage` → **Run workflow**。
+4. **推荐：直接去 Releases 页下载**（`release` job 会自动把 AppImage 挂上去）：
+   - 页面：`https://github.com/<你的账号>/airplay-deck/releases`
+   - 每次推送会创建/更新标签形如 `v0.6.0-rc` 的 **prerelease**，资产就是
+     `AirPlayDeck-0.6.0-x86_64.AppImage`（约 98 MB），点一下即下，不用解压 zip。
+   - 直链形如：`https://github.com/<你的账号>/airplay-deck/releases/download/v0.6.0-rc/AirPlayDeck-0.6.0-x86_64.AppImage`
+
+5. 备选：在该次运行的 **Artifacts** 里下载 `AirPlayDeck-AppImage`（zip，保留 90 天）。
+   命令行等价命令是 `gh run download <run-id> --name AirPlayDeck-AppImage --dir dist`。
 
 > **workflow 为什么这样写**：宿主固定 `ubuntu-24.04`（长期支持），但整个构建跑在
 > `container: ubuntu:22.04` 里。因为 AppImage 打包的是**构建机上的** python 解释器，
