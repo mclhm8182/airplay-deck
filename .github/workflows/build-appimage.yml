@@ -38,8 +38,12 @@ jobs:
           # python3 / python3-pip：build-appimage.sh 会把**系统解释器**整体拷进 AppDir，
           # 所以必须确保容器里有 python3.10（22.04 的系统版本）。libfuse2 是 appimagetool
           # 直接运行所需；容器里通常没有 /dev/fuse，脚本会自动回退到 --appimage-extract。
+          # libgl1：裸容器没有 Mesa，而 import QtWidgets 会链接 libGL.so.1；
+          #   打包前的「瘦身自检」要用 offscreen 真跑一遍 Qt，缺它会导致自检误报失败。
+          #   （运行环境桌面 Linux / Steam Deck 自带 Mesa，无需打进 AppImage。）
           apt-get install -y -qq --no-install-recommends \
-            python3 python3-pip curl squashfs-tools file patchelf libfuse2 xz-utils
+            python3 python3-pip curl squashfs-tools file patchelf libfuse2 xz-utils \
+            libgl1 libglib2.0-0
 
       - name: 构建 AppImage
         run: |

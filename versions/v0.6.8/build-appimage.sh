@@ -328,15 +328,52 @@ exec "$HERE/usr/bin/python3" "$HERE/opt/airplay-deck/airplay-deck.py" "$@"
 EOF
 chmod +x AppDir/AppRun
 
+# ---- 瘦身自检：确认删掉 Qt 库/插件后，AppDir 里的 PySide6 仍然可用 ----
+# 瘦身靠「删除用不到的模块」实现，一旦误删（例如某个模块实际被依赖），
+# 打出来的包能正常生成、但运行时才会崩。这里在打包前用 AppDir 自带的 python
+# 真跑一遍 Qt（offscreen，无需显示器），不通过就直接让构建失败。
+echo "[build] 自检：验证瘦身后的 AppDir 可用…"
+PYDIR_APP="$(ls -d "$HERE/AppDir"/usr/lib/python3* 2>/dev/null | head -n1)"
+if [ -d "$HERE/$PYSIDE_LIB/Qt/lib" ]; then
+  QT_LIB_APP="$HERE/$PYSIDE_LIB/Qt/lib"; QT_PLUG_APP="$HERE/$PYSIDE_LIB/Qt/plugins"
+else
+  QT_LIB_APP="$HERE/$PYSIDE_LIB/Qt6/lib"; QT_PLUG_APP="$HERE/$PYSIDE_LIB/Qt6/plugins"
+fi
+SELFTEST_OUT=$(LD_LIBRARY_PATH="$HERE/AppDir/usr/lib:$HERE/AppDir/usr/lib/x86_64-linux-gnu:$QT_LIB_APP" \
+  QT_PLUGIN_PATH="$QT_PLUG_APP" \
+  QT_QPA_PLATFORM=offscreen \
+  PYTHONPATH="$HERE/AppDir/opt/airplay-deck:$PYDIR_APP/dist-packages:$PYDIR_APP/site-packages" \
+  "$HERE/AppDir/usr/bin/python3" -c "
+from PySide6.QtWidgets import QApplication, QPushButton, QMainWindow
+from PySide6.QtGui import QIcon, QPixmap, QPainter
+from PySide6.QtSvg import QSvgRenderer
+app = QApplication([])
+w = QMainWindow(); w.setCentralWidget(QPushButton('x')); w.show()
+print('SLIM_SELFTEST_OK')" 2>&1) || true
+echo "$SELFTEST_OUT" | tail -n 8
+if echo "$SELFTEST_OUT" | grep -q "SLIM_SELFTEST_OK"; then
+  echo "[build] 自检通过：瘦身后的 Qt 可用。"
+elif echo "$SELFTEST_OUT" | grep -Eq "libGL\.so|libEGL\.so|libX11\.so"; then
+  # 缺的是系统级图形库（Mesa 等），不是被我们删掉的 Qt 库：属于构建机缺依赖，
+  # 运行环境（桌面 Linux / Steam Deck）自带这些库，不应因此中断构建。
+  echo "[build] ⚠ 自检跳过：构建环境缺少系统图形库（libGL/libEGL/libX11），无法离屏启动 Qt。"
+  echo "        这是构建机缺依赖（apt install -y libgl1），不是瘦身删错了库；继续打包。"
+else
+  echo "[build] ✗ 瘦身自检失败：被删掉的 Qt 库/插件可能是必需的。"
+  echo "        请回退瘦身步骤（或把缺失模块加回保留列表）后再打包，不要发布这个产物。"
+  exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # 3) 打包成 AppImage
 # ---------------------------------------------------------------------------
 echo "[build] 运行 appimagetool 生成 AppImage…"
 OUTPUT_APPIMAGE="$HERE/AirPlayDeck-${VERSION}-x86_64.AppImage"
-# 若 appimagetool 支持 --comp，则启用 zstd 高压缩进一步减小体积（不支持则忽略）
+# 若 appimagetool 支持 --comp，则用 xz 进一步减小体积（不支持则忽略）。
+# 注意：只能填 gzip 或 xz——该版本明确只支持这两种，填 zstd 会直接报错退出。
 COMP_FLAG=""
 if $APPIMAGETOOL --help 2>&1 | grep -q -- '--comp'; then
-  COMP_FLAG="--comp zstd"
+  COMP_FLAG="--comp xz"
 fi
 $APPIMAGETOOL $COMP_FLAG "$HERE/AppDir" "$OUTPUT_APPIMAGE" \
   || { echo "[build] appimagetool 失败。常见原因：缺少 file/patchelf（sudo apt install -y file patchelf）或 libfuse2（sudo apt install -y libfuse2）"; exit 1; }
