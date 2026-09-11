@@ -1,0 +1,44 @@
+name: Build AirPlay Deck AppImage
+
+# 在 GitHub 的 Ubuntu  runners（标准 x86_64 Linux）上自动构建 AppImage，
+# 无需本地 Linux / Docker / macOS。构建完成后在 Actions 页面的 Artifacts 里下载即可。
+on:
+  workflow_dispatch:        # 允许在 GitHub 网页手动触发
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    # 必须钉在 22.04，不要用 ubuntu-latest（现在是 24.04）：
+    # AppImage 里打包的是**构建机上的** python 解释器，它会链接构建机的 glibc。
+    # 在 glibc 2.39（24.04）上构建，拿到较老的 SteamOS 上会报 GLIBC_2.39 not found。
+    # 22.04 = glibc 2.35 + python 3.10，向前兼容性最好，也与 README 推荐的
+    # distrobox 构建容器（ubuntu:22.04）保持一致。
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl squashfs-tools file patchelf python3-pip
+          # libfuse2 在 Ubuntu 24.04 里改名成 libfuse2t64（time_t 过渡）；
+          # 两者都试一遍，装不上也不致命——build-appimage.sh 有 --appimage-extract 兜底。
+          sudo apt-get install -y --no-install-recommends libfuse2 \
+            || sudo apt-get install -y --no-install-recommends libfuse2t64 \
+            || true
+
+      - name: 构建 AppImage
+        run: |
+          chmod +x build-appimage.sh
+          ./build-appimage.sh
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirPlayDeck-AppImage
+          # 产物名带版本号（AirPlayDeck-<版本号>-x86_64.AppImage），故用通配符匹配
+          path: "AirPlayDeck-*-x86_64.AppImage"
+          if-no-files-found: error

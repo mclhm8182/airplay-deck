@@ -1,0 +1,32 @@
+name: Build AirPlay Deck AppImage
+
+# 在 GitHub 的 Ubuntu  runners（标准 x86_64 Linux）上自动构建 AppImage，
+# 无需本地 Linux / Docker / macOS。构建完成后在 Actions 页面的 Artifacts 里下载即可。
+on:
+  workflow_dispatch:        # 允许在 GitHub 网页手动触发
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl libfuse2 squashfs-tools file patchelf
+
+      - name: 构建 AppImage
+        run: |
+          chmod +x build-appimage.sh
+          ./build-appimage.sh
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirPlayDeck-AppImage
+          path: "AirPlayDeck-x86_64.AppImage"
+          if-no-files-found: error

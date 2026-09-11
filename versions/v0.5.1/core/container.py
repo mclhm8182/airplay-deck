@@ -1,0 +1,426 @@
+"""首次启动自动安装 / 一键清爽卸载 uxplay 运行环境（distrobox 容器）。
+
+方案 B：AppImage 本身不含 uxplay。新用户首次打开 App 时，自动拉取并构建
+`uxplay-env` 容器，容器里装好 uxplay + GStreamer 全套插件，之后即可投屏。
+卸载时清掉容器 + 镜像（若不被其它容器占用）+ 应用设置与日志，清爽如初。
+
+所有命令走 rootless 的 distrobox / podman，落在用户家目录，**不需要 sudo**，
+也绕开 SteamOS 只读根。镜像拉取与 apt 安装耗时较长，调用方应在后台线程里跑，
+并通过 log_fn 逐行回显进度。
+
+踩过的坑（写在前面）
+----------------------
+1. 安装时必须用 root 跑 apt：`distrobox enter` 默认以宿主普通用户（deck）进入，
+   apt-get 需要 root，否则报 "Could not open lock file ... Permission denied"。
+   因此安装步骤统一用 `podman exec -u 0` 以容器内的 root 跑 apt，不依赖 sudo/密码。
+2. 卸载时容器可能卡在坏状态（conmon exited prematurely），`distrobox rm -f` /
+   普通 `podman rm -f` 会卡在「无法停止」。这里用多策略强制删除：
+   先 raw `podman rm -f`，失败则杀掉该容器的 conmon 进程再重试，最后回退 distrobox。
+3. 重建前先判容器是否可用（`podman exec <c> true`）；不可用（含卡死）则强制删掉重建，
+   避免出现「容器已存在 → 跳过创建 → 但里面 uxplay 没装好」的死循环。
+"""
+
+import os
+import shutil
+import signal
+import subprocess
+import time
+from typing import Callable, Optional, Tuple
+
+from . import settings as cfg
+
+LogFn = Callable[[str, str], None]   # (level, message)
+
+# 基础镜像：Ubuntu 22.04 与构建容器一致，apt 源正常、无 SteamOS 限制
+BASE_IMAGE = "docker.io/library/ubuntu:22.04"
+
+# 容器内要装的包：uxplay 本体 + GStreamer 全套
+# （base/good/bad 负责 h264 解码、libav 即 ffmpeg 负责 aac 音频解码、vaapi 可选硬解）
+APT_PACKAGES = [
+    "uxplay",
+    "gstreamer1.0-plugins-base",
+    "gstreamer1.0-plugins-good",
+    "gstreamer1.0-plugins-bad",
+    "gstreamer1.0-plugins-ugly",
+    "gstreamer1.0-libav",
+    "gstreamer1.0-vaapi",
+    "libavahi-compat-libdnssd-dev",
+    "avahi-utils",
+    "pkg-config",
+]
+
+
+def distrobox_available() -> bool:
+    return shutil.which("distrobox") is not None
+
+
+def podman_available() -> bool:
+    return shutil.which("podman") is not None
+
+
+def container_exists(container: str) -> bool:
+    if podman_available():
+        try:
+            r = subprocess.run(
+                ["podman", "ps", "-a", "--format", "{{.Names}}"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode == 0:
+                names = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+                return container in names
+        except Exception:
+            pass
+    if distrobox_available():
+        try:
+            r = subprocess.run(
+                ["distrobox", "list", "--name"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode == 0:
+                names = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+                return container in names
+        except Exception:
+            pass
+    return False
+
+
+def uxplay_installed(container: str) -> bool:
+    """容器内是否已有 uxplay 可执行文件。
+
+    用 podman exec 探测：rootless 容器免授权，游戏模式/桌面模式都能用，
+    不触发 distrobox 的图形导出弹窗。
+    """
+    if not podman_available():
+        return False
+    try:
+        r = subprocess.run(
+            ["podman", "exec", container, "bash", "-lc", "command -v uxplay"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.returncode == 0 and "uxplay" in (r.stdout or "")
+    except Exception:
+        return False
+
+
+def is_ready(container: str) -> bool:
+    """运行环境是否就绪：容器存在且里面已装 uxplay。"""
+    return container_exists(container) and uxplay_installed(container)
+
+
+def _container_id(container: str) -> Optional[str]:
+    if not podman_available():
+        return None
+    try:
+        r = subprocess.run(
+            ["podman", "ps", "-a", "--filter", f"name=^{container}$",
+             "--format", "{{.ID}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _container_image_id(container: str) -> Optional[str]:
+    """取出容器当前使用的镜像 id（删除容器前先取，删后就查不到了）。"""
+    if not podman_available():
+        return None
+    try:
+        r = subprocess.run(
+            ["podman", "inspect", "-f", "{{.Image}}", container],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _image_used_elsewhere(image_id: str, except_container: str) -> bool:
+    """该镜像是否还被其它容器引用；不确定时保守返回 True（不删）。"""
+    if not image_id or not podman_available():
+        return True
+    try:
+        r = subprocess.run(
+            ["podman", "ps", "-a", "--format", "{{.Names}} {{.Image}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            return True
+        for ln in r.stdout.splitlines():
+            parts = ln.split(None, 1)
+            if len(parts) < 2:
+                continue
+            name, img = parts[0].strip(), parts[1].strip()
+            if name == except_container:
+                continue
+            if img == image_id:
+                return True
+        return False
+    except Exception:
+        return True
+
+
+def _container_usable(container: str) -> bool:
+    """容器是否处于健康可 exec 状态。
+
+    先尝试启动（若已停），再 `podman exec <c> true`；失败（含卡死/坏 conmon）返回 False，
+    调用方应强制删掉重建。无 podman 时无法判断，返回 True 交给后续步骤报错。
+    """
+    if not podman_available():
+        return True
+    try:
+        subprocess.run(["podman", "start", container], capture_output=True, timeout=30)
+        r = subprocess.run(
+            ["podman", "exec", container, "true"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _kill_conmon(container: str) -> None:
+    """杀掉该容器残留的 conmon 进程（解决 'conmon exited prematurely' 导致删不掉）。"""
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", f"conmon.*{container}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for pid in [p for p in r.stdout.split() if p.strip().isdigit()]:
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # 也按容器短 id 兜底杀一次
+    cid = _container_id(container)
+    if cid:
+        try:
+            r = subprocess.run(
+                ["pgrep", "-f", f"conmon.*{cid}"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for pid in [p for p in r.stdout.split() if p.strip().isdigit()]:
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+def _force_remove_container(container: str, log_fn: LogFn) -> bool:
+    """多策略强制删除容器，尽量清掉卡在坏状态的容器。
+
+    返回是否删除成功。
+    """
+    for cmd in (["podman", "rm", "-f", container],
+                ["podman", "container", "rm", "-f", container]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if r.returncode == 0:
+                return True
+            err = ((r.stderr or r.stdout) or "").strip().splitlines()[-1] \
+                if (r.stderr or r.stdout) else ""
+        except Exception as e:
+            err = str(e)
+        log_fn("warn", f"{' '.join(cmd)} 失败：{err}")
+        _kill_conmon(container)
+    # 回退：distrobox rm
+    try:
+        r = subprocess.run(
+            ["distrobox", "rm", "-f", container],
+            capture_output=True, text=True, timeout=60,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _stream(cmd: list[str], log_fn: LogFn, timeout_total: float = 900.0) -> Tuple[int, str]:
+    """运行命令并逐行回调 log_fn(level, line)。返回 (returncode, 末尾错误信息)。"""
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+    except FileNotFoundError as e:
+        log_fn("error", f"找不到命令: {e}")
+        return -1, str(e)
+    assert proc.stdout is not None
+    last_err = ""
+    t0 = time.time()
+    for line in proc.stdout:
+        if time.time() - t0 > timeout_total:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            log_fn("error", "操作超时，已中止")
+            return -2, "timeout"
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        low = line.lower()
+        if any(k in low for k in ("error", "e:", "err:", "fatal", "failed", "cannot")):
+            last_err = line
+            log_fn("error", line)
+        elif any(k in low for k in ("warning", "warn")):
+            log_fn("warn", line)
+        else:
+            log_fn("info", line)
+    rc = proc.wait()
+    return rc, last_err
+
+
+def create_and_install(container: str, log_fn: LogFn) -> Tuple[bool, str]:
+    """创建容器并安装 uxplay + GStreamer 全套。返回 (成功, 摘要)。"""
+    if not distrobox_available() and not podman_available():
+        return False, "未找到 distrobox / podman，无法自动创建容器。请先安装 distrobox。"
+
+    log_fn("info",
+           f"开始创建容器 {container}（镜像 {BASE_IMAGE}；首次需联网拉取，约 400–800 MB）…")
+
+    # 1) 容器不存在 → 创建；存在但不可用（卡死）→ 强制删掉重建
+    if not container_exists(container):
+        log_fn("info", f"容器 {container} 不存在，开始创建")
+    else:
+        if _container_usable(container) and uxplay_installed(container):
+            log_fn("info", f"容器 {container} 已存在且 uxplay 就绪，跳过")
+            return True, f"运行环境已就绪（容器 {container}）"
+        if _container_usable(container):
+            log_fn("info", f"容器 {container} 已存在但未装好 uxplay，直接补装")
+        else:
+            log_fn("warn", f"容器 {container} 处于异常状态，强制删除后重建…")
+            _force_remove_container(container, log_fn)
+
+    if not container_exists(container):
+        create_cmd = (["distrobox", "create", "-i", BASE_IMAGE, "-n", container, "--yes"]
+                      if distrobox_available()
+                      else ["podman", "create", "--name", container,
+                            BASE_IMAGE, "sleep", "infinity"])
+        rc, err = _stream(create_cmd, log_fn)
+        if rc != 0:
+            return False, f"创建容器失败: {err or 'rc=' + str(rc)}"
+
+    # 2) 安装软件（必须用 root 跑 apt，否则 Permission denied）
+    log_fn("info", "在容器内安装 uxplay 与 GStreamer 插件（apt，可能需要几分钟）…")
+    # distrobox create 初始化时会自己跑 apt-get update/upgrade，可能与我们的安装抢同一把
+    # apt 锁（E: Could not get lock /var/lib/dpkg/lock-frontend）。9/9 日志复盘：
+    # 裸 ubuntu:22.04 镜像没有 pgrep（procps 未装），旧的等待循环第一行
+    # `command -v pgrep || break` 会立刻跳出 → 完全没等 → 与初始化 apt 撞锁失败。
+    # 修复：1) pgrep 存在才按进程等待，且等够 300s；2) 给 apt-get 传
+    # DPkg::Lock::Timeout=600，让 apt 自己排队等锁释放（最可靠，不依赖 pgrep）；
+    # 3) 不再 rm 锁文件——锁文件存在不碍事，删了反而可能让两个 apt 并发损坏 dpkg 库。
+    pkgs = " ".join(APT_PACKAGES)
+    install_sh = (
+        "#!/bin/bash\n"
+        "if command -v pgrep >/dev/null 2>&1; then\n"
+        "  for _i in $(seq 1 300); do\n"
+        "    if ! pgrep -x apt-get >/dev/null 2>&1 && ! pgrep -x dpkg >/dev/null 2>&1"
+        " && ! pgrep -x apt >/dev/null 2>&1; then break; fi\n"
+        "    sleep 1\n"
+        "  done\n"
+        "fi\n"
+        "for _a in 1 2 3 4 5 6 7 8; do\n"
+        "  if apt-get -o DPkg::Lock::Timeout=600 update"
+        " && DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600"
+        " install -y --no-install-recommends "
+        + pkgs
+        + "; then break; fi\n"
+        "  sleep 10\n"
+        "done\n"
+    )
+    if podman_available():
+        # 确保容器在跑，并以容器内 root(-u 0) 安装，无需 sudo/密码
+        try:
+            subprocess.run(["podman", "start", container],
+                           capture_output=True, timeout=30)
+        except Exception:
+            pass
+        inst_cmd = ["podman", "exec", "-u", "0", container, "bash", "-lc", install_sh]
+    else:
+        inst_cmd = ["distrobox", "enter", container, "--", "sudo", "bash", "-lc", install_sh]
+    rc, err = _stream(inst_cmd, log_fn, timeout_total=1800.0)
+    if rc != 0:
+        return False, f"安装软件失败: {err or 'rc=' + str(rc)}"
+
+    # 3) 校验
+    if uxplay_installed(container):
+        log_fn("info", f"uxplay 已就绪：容器 {container}")
+        return True, f"运行环境已安装到容器 {container}"
+    return False, "安装完成但容器内找不到 uxplay，请检查日志"
+
+
+def uninstall(
+    container: str,
+    remove_image: bool = True,
+    remove_appdata: bool = True,
+    log_fn: Optional[LogFn] = None,
+) -> Tuple[bool, str]:
+    """一键清爽卸载：删容器 + 镜像（若不被其它容器占用）+ 应用设置与日志。
+
+    返回 (成功, 摘要)。AppImage 自身不会被删除（进程正在跑，且删除自己无意义），
+    用户可手动删除文件与 Steam「非 Steam 游戏」条目。
+    """
+    log_fn = log_fn or (lambda *a, **k: None)
+    removed: list[str] = []
+
+    # 先取镜像 id（删容器后就查不到了），并判断是否被其它容器共享
+    img = _container_image_id(container)
+
+    # 1) 删除容器（多策略强制删除，处理卡死状态）
+    if container_exists(container):
+        log_fn("info", f"删除容器 {container}…")
+        if _force_remove_container(container, log_fn):
+            removed.append("容器")
+        else:
+            cid = _container_id(container) or container
+            log_fn("warn", "容器删除失败（可能处于异常状态）。可手动执行："
+                          f"podman rm -f {cid}")
+    else:
+        log_fn("info", f"容器 {container} 不存在，跳过")
+
+    # 2) 删除镜像（若该镜像不被其它容器引用）
+    if remove_image:
+        if img and not _image_used_elsewhere(img, container):
+            log_fn("info", f"删除镜像 {img}…")
+            try:
+                r = subprocess.run(
+                    ["podman", "rmi", "-f", img],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if r.returncode == 0:
+                    removed.append("镜像")
+                else:
+                    tail = ""
+                    if r.stderr:
+                        tail = r.stderr.strip().splitlines()[-1]
+                    log_fn("warn", f"删除镜像失败（可能仍被占用）：{tail}")
+            except Exception as e:
+                log_fn("warn", f"删除镜像失败: {e}")
+        elif img:
+            log_fn("info", "镜像仍被其它容器使用，已保留（不影响本 App 卸载）")
+        else:
+            log_fn("info", "无法确定镜像，跳过删除")
+
+    # 3) 删除应用数据（设置 + 运行日志）
+    if remove_appdata:
+        for d in (cfg.CONFIG_DIR, cfg.LOG_DIR):
+            try:
+                if d.exists():
+                    import shutil as _sh
+                    _sh.rmtree(d)
+                    removed.append(f"数据({d.name})")
+                    log_fn("info", f"已删除 {d}")
+            except Exception as e:
+                log_fn("warn", f"删除 {d} 失败: {e}")
+
+    if not removed:
+        return True, "无可清理项"
+    return True, "已清理：" + "、".join(removed)

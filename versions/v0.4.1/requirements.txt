@@ -1,0 +1,2 @@
+# AirPlay Deck 运行时依赖（源码运行用；AppImage 通过 apt 打包，无需 pip）
+PyQt6>=6.4
