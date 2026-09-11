@@ -1,7 +1,10 @@
 name: Build AirPlay Deck AppImage
 
 # 在 GitHub 的 x86_64 Linux runner 上自动构建 AppImage，
-# 无需本地 Linux / Docker / macOS。构建完成后在 Actions 页面的 Artifacts 里下载即可。
+# 无需本地 Linux / Docker / macOS。构建完成后：
+#   · Actions 页面的 Artifacts 里可下载（保留 90 天）；
+#   · 同时自动发布/更新一个 **prerelease**，把 AppImage 直接挂在里面——
+#     想拿到文件时去 Releases 页点一下最省事，不用解压 artifact zip。
 on:
   workflow_dispatch:        # 允许在 GitHub 网页手动触发
   push:
@@ -43,10 +46,59 @@ jobs:
           chmod +x build-appimage.sh
           ./build-appimage.sh
 
-      - name: 上传产物
+      - name: 上传产物（Actions Artifacts，保留 90 天）
         uses: actions/upload-artifact@v4
         with:
           name: AirPlayDeck-AppImage
           # 产物名带版本号（AirPlayDeck-<版本号>-x86_64.AppImage），故用通配符匹配
           path: "AirPlayDeck-*-x86_64.AppImage"
           if-no-files-found: error
+
+  release:
+    needs: build
+    # 这一步不需要 22.04 容器——只是把文件挂到 Release 上，用宿主 runner 自带的 gh 即可。
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # 创建 release / 上传资产必须有这个权限
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: AirPlayDeck-AppImage
+          path: dist
+
+      - name: 发布 / 更新 prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(ls dist/AirPlayDeck-*.AppImage | head -n1)
+          VER=$(basename "$APPIMAGE"); VER=${VER#AirPlayDeck-}; VER=${VER%-x86_64.AppImage}
+          TAG="v${VER}-rc"
+          echo "版本：$VER    标签：$TAG    文件：$APPIMAGE"
+          ls -lh "$APPIMAGE"
+
+          cat > /tmp/notes.md <<'EOF'
+          自动构建的预发布版本（引擎：UxPlay 1.73.7）。
+
+          ## 怎么用
+
+          1. 下载下面的 `.AppImage` 文件
+          2. 拷到 Steam Deck 的 `~/Applications/`
+          3. `chmod +x ~/Applications/AirPlayDeck-*-x86_64.AppImage`
+          4. Steam → 库 → 添加非 Steam 游戏 → 选中它
+          5. 首次启动后点「一键检查运行环境」，会自动把容器里的 UxPlay 编译升级到 1.73.7
+
+          > 这是 **预发布（prerelease）**，不是正式版。重新推送到 `main` 会覆盖更新同一个资产。
+          > 系统要求：x86_64 Linux（SteamOS 已验证），glibc >= 2.35。
+          EOF
+
+          # 已存在同名 tag 时 create 会失败，此时改为覆盖上传资产（--clobber）
+          gh release create "$TAG" "$APPIMAGE" \
+            --title "AirPlay Deck ${VER}（预发布）" \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --notes-file /tmp/notes.md \
+            || gh release upload "$TAG" "$APPIMAGE" --clobber
+
+          echo "发布完成：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
