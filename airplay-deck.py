@@ -12,6 +12,7 @@
 
 import os
 import sys
+import socket
 import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +45,25 @@ RUNTIME_KEYS = {
     "extra", "uxplay_path", "use_distrobox", "distrobox_container",
     "distrobox_method",
 }
+
+
+# --------------------------------------------------------------------------- #
+# 设备广播名计算
+#
+# UxPlay 的 -nh 关闭「追加主机名」；开启时广播名格式为「设备名@主机名」
+# （uxplay.cpp 的 append_hostname()：name.append("@"); name.append(nodename)）。
+# 主页只显示设备名，主机名只在 iPhone 的屏幕镜像列表里出现——这也是用户勾选
+# 后「看起来没变化」的原因。这里集中算完整广播名，方便 App 内直接预览。
+def full_device_name(device_name: str, append_hostname: bool) -> str:
+    device_name = (device_name or "SteamDeck").strip() or "SteamDeck"
+    if append_hostname:
+        try:
+            host = (socket.gethostname() or "").strip()
+        except Exception:
+            host = ""
+        if host:
+            return f"{device_name}@{host}"
+    return device_name
 
 
 # --------------------------------------------------------------------------- #
@@ -419,7 +439,11 @@ class MainWindow(QMainWindow):
         row.addWidget(self.toggle)
         cv.addLayout(row)
         self.device_hint = QLabel(
-            self.T("device_prefix") + self.settings.get("device_name", "SteamDeck")
+            self.T("device_prefix")
+            + full_device_name(
+                self.settings.get("device_name", "SteamDeck"),
+                bool(self.settings.get("append_hostname")),
+            )
         )
         self.device_hint.setObjectName("hint")
         cv.addWidget(self.device_hint)
@@ -582,6 +606,16 @@ class MainWindow(QMainWindow):
         self.f_append = QCheckBox(self.T("append_host"))
         self.f_append.setChecked(bool(self.settings.get("append_hostname")))
         form.addRow(self._form_label(""), self.f_append)
+
+        # 实时预览：勾选「追加主机名」后，iPhone 屏幕镜像列表里实际出现的完整广播名
+        self.bc_preview = QLabel()
+        self.bc_preview.setObjectName("hint")
+        self.bc_preview.setStyleSheet(
+            "color: #8b949e; font-size: 12px; line-height: 1.6;"
+        )
+        form.addRow(self._form_label(""), self.bc_preview)
+        self.f_name.textChanged.connect(self._update_broadcast_preview)
+        self.f_append.toggled.connect(self._update_broadcast_preview)
 
         self.f_autostart = QCheckBox(self.T("autostart"))
         self.f_autostart.setChecked(bool(self.settings.get("autostart")))
@@ -902,6 +936,15 @@ class MainWindow(QMainWindow):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """)
 
+    def _update_broadcast_preview(self) -> None:
+        """设置页实时预览：iPhone 屏幕镜像列表里实际出现的完整广播名。"""
+        name = self.f_name.text().strip() or "SteamDeck"
+        full = full_device_name(name, self.f_append.isChecked())
+        try:
+            self.bc_preview.setText(self.T("append_host_preview").replace("{name}", full))
+        except Exception:
+            self.bc_preview.setText(full)
+
     def _load_ui_from_settings(self) -> None:
         s = self.settings
         self.f_name.setText(s.get("device_name", "SteamDeck"))
@@ -927,8 +970,16 @@ class MainWindow(QMainWindow):
             self._lang_combo.setCurrentIndex(max(0, i))
         try:
             self.device_hint.setText(
-                self.T("device_prefix") + str(s.get("device_name", "SteamDeck"))
+                self.T("device_prefix")
+                + full_device_name(
+                    s.get("device_name", "SteamDeck"),
+                    bool(s.get("append_hostname")),
+                )
             )
+        except Exception:
+            pass
+        try:
+            self._update_broadcast_preview()
         except Exception:
             pass
 
@@ -1094,7 +1145,11 @@ class MainWindow(QMainWindow):
             return
         try:
             self.device_hint.setText(
-                self.T("device_prefix") + str(self.settings.get("device_name", "SteamDeck"))
+                self.T("device_prefix")
+                + full_device_name(
+                    self.settings.get("device_name", "SteamDeck"),
+                    bool(self.settings.get("append_hostname")),
+                )
             )
         except Exception:
             pass
