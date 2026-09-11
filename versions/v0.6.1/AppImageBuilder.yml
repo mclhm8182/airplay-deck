@@ -1,0 +1,42 @@
+# ============================================================================
+#  AppImageBuilder 配方 —— 在 Linux（x86_64）上构建 AirPlay Deck 的 AppImage。
+#
+#  构建流程见 build-appimage.sh：它先把本仓库内容铺进 ./AppDir，本配方只负责
+#  把 Python3 + PyQt6 等运行依赖打包进去，最终产出 AirPlayDeck-x86_64.AppImage。
+#
+#  重要：uxplay 本身「不」打进 AppImage，依赖系统已安装（SteamOS: yay -S uxplay）。
+#  这样 AppImage 体积小、且始终用系统最新的 GStreamer / 解码器。App 启动时会检测
+#  uxplay 是否存在，缺失则给出对应发行版的安装命令。
+# ============================================================================
+version: 1
+
+AppDir:
+  path: ./AppDir
+
+  app_info:
+    id: com.airplaydeck.App
+    name: AirPlay Deck
+    icon: airplay-deck
+    version: 0.1.0
+    exec: usr/bin/airplay-deck.sh
+    exec_args: $@
+
+  apt:
+    arch: amd64
+    sources:
+      - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse'
+        key_url: 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3B4FE6ACC0B21F32'
+    include:
+      - python3
+      - python3-pyqt6
+      - python3-pyqt6.qtsvg
+      - libgl1
+      - libx11-6
+    exclude:
+      - python3-dev
+      - libpython3-dev
+
+AppImage:
+  arch: x86_64
+  name: AirPlayDeck-x86_64.AppImage
+  update-information: nil
