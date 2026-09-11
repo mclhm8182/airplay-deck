@@ -135,6 +135,8 @@ S: Dict[str, Dict[str, str]] = {
                    "ko": "비디오 싱크", "fr": "Sortie vidéo", "de": "Video-Sink", "es": "Salida de vídeo"},
     "resolution": {"zh_CN": "渲染分辨率", "zh_TW": "渲染解析度", "en": "Resolution", "ja": "解像度",
                    "ko": "렌더링 해상도", "fr": "Résolution", "de": "Auflösung", "es": "Resolución"},
+    "res_auto": {"zh_CN": "自动", "zh_TW": "自動", "en": "Auto", "ja": "自動",
+                 "ko": "자동", "fr": "Auto", "de": "Auto", "es": "Auto"},
     "display_mode": {"zh_CN": "显示模式", "zh_TW": "顯示模式", "en": "Display mode", "ja": "表示モード",
                      "ko": "화면 모드", "fr": "Mode d'affichage", "de": "Anzeigemodus", "es": "Modo de pantalla"},
     "decoder": {"zh_CN": "解码器", "zh_TW": "解碼器", "en": "Decoder", "ja": "デコーダ",

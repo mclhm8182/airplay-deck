@@ -26,7 +26,7 @@ from PySide6.QtGui import QIcon, QPainter, QColor, QPixmap, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QPushButton, QLineEdit, QComboBox, QTextEdit, QCheckBox,
-    QSystemTrayIcon, QMenu, QMessageBox, QFrame, QScrollArea, QDialog,
+    QSystemTrayIcon, QMenu, QMessageBox, QFrame, QScrollArea, QDialog, QSizePolicy,
 )
 
 from core import settings as cfg, launcher, session, uxplay_args
@@ -605,15 +605,21 @@ class MainWindow(QMainWindow):
 
         self.f_append = QCheckBox(self.T("append_host"))
         self.f_append.setChecked(bool(self.settings.get("append_hostname")))
-        form.addRow(self._form_label(""), self.f_append)
 
-        # 实时预览：勾选「追加主机名」后，iPhone 屏幕镜像列表里实际出现的完整广播名
+        # 实时预览：勾选「追加主机名」后，iPhone 屏幕镜像列表里实际出现的完整广播名。
+        # 与上方复选框放进同一个竖向容器，提示紧贴复选框、并与上下行间距保持一致。
         self.bc_preview = QLabel()
         self.bc_preview.setObjectName("hint")
         self.bc_preview.setStyleSheet(
             "color: #8b949e; font-size: 12px; line-height: 1.6;"
         )
-        form.addRow(self._form_label(""), self.bc_preview)
+        _append_box = QWidget()
+        _append_v = QVBoxLayout(_append_box)
+        _append_v.setContentsMargins(0, 0, 0, 0)
+        _append_v.setSpacing(4)
+        _append_v.addWidget(self.f_append)
+        _append_v.addWidget(self.bc_preview)
+        form.addRow(self._form_label(""), _append_box)
         self.f_name.textChanged.connect(self._update_broadcast_preview)
         self.f_append.toggled.connect(self._update_broadcast_preview)
 
@@ -678,8 +684,12 @@ class MainWindow(QMainWindow):
         form.addRow(self._form_label(self.T("video_sink")), self.f_sink)
 
         self.f_res = QComboBox()
-        self.f_res.addItems(cfg.RESOLUTION_CHOICES)
-        self.f_res.setCurrentText(self.settings.get("resolution", "auto"))
+        for _v in cfg.RESOLUTION_CHOICES:
+            # auto 显示为「自动」（随语言变化），其余分辨率原样显示；
+            # 用 userData 存原始值，保证设置读写与旧版本兼容。
+            self.f_res.addItem(self.T("res_auto") if _v == "auto" else _v, _v)
+        i = self.f_res.findData(self.settings.get("resolution", "auto"))
+        self.f_res.setCurrentIndex(max(0, i))
         form.addRow(self._form_label(self.T("resolution")), self.f_res)
 
         self.f_mode = QComboBox()
@@ -742,7 +752,8 @@ class MainWindow(QMainWindow):
         i = self.f_fps.findData(30)
         self.f_fps.setCurrentIndex(max(0, i))
         self.f_sink.setCurrentText("ximagesink")
-        self.f_res.setCurrentText("auto")
+        i = self.f_res.findData("auto")
+        self.f_res.setCurrentIndex(max(0, i))
         i = self.f_mode.findData("auto")
         self.f_mode.setCurrentIndex(max(0, i))
         i = self.f_decoder.findData("auto")
@@ -850,11 +861,12 @@ class MainWindow(QMainWindow):
         cv.addWidget(text)
         # GitHub 仓库跳转链接（发布者 mclhm8182）+ GitHub 图标；点击用 QDesktopServices 打开浏览器
         gh_row = QWidget()
+        # 不让这行在竖向布局里被拉伸成整行宽（否则图标与链接右侧会出现一长条空白）
+        gh_row.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred))
         gh_h = QHBoxLayout(gh_row)
         gh_h.setContentsMargins(0, 0, 0, 0)
-        gh_h.setSpacing(6)
+        gh_h.setSpacing(4)
         gh_icon = QLabel()
-        gh_icon.setObjectName("hint")
         _gh_svg = (
             '<svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 16 16">'
             '<path fill="#cfd1d5" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17'
@@ -868,12 +880,15 @@ class MainWindow(QMainWindow):
         try:
             from PySide6.QtSvg import QSvgRenderer
             _r = QSvgRenderer(bytearray(_gh_svg.encode("utf-8")))
-            _pm = QPixmap(18, 18)
+            _pm = QPixmap(16, 16)
             _pm.fill(Qt.GlobalColor.transparent)
             _p = QPainter(_pm)
             _r.render(_p)
             _p.end()
             gh_icon.setPixmap(_pm)
+            gh_icon.setFixedSize(16, 16)
+            gh_icon.setScaledContents(True)
+            gh_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         except Exception:
             gh_icon.setText("🔗")
         gh_h.addWidget(gh_icon)
@@ -983,7 +998,8 @@ class MainWindow(QMainWindow):
         i = self.f_fps.findData(int(s.get("fps", 30) or 30))
         self.f_fps.setCurrentIndex(max(0, i))
         self.f_sink.setCurrentText(s.get("video_sink", "ximagesink"))
-        self.f_res.setCurrentText(s.get("resolution", "auto"))
+        i = self.f_res.findData(s.get("resolution", "auto"))
+        self.f_res.setCurrentIndex(max(0, i))
         i = self.f_mode.findData(s.get("display_mode", "auto"))
         self.f_mode.setCurrentIndex(max(0, i))
         i = self.f_decoder.findData(s.get("decoder", "auto"))
@@ -1149,7 +1165,7 @@ class MainWindow(QMainWindow):
         s["autostart"] = self.f_autostart.isChecked()
         s["fps"] = int(self.f_fps.currentData() or 30)
         s["video_sink"] = self.f_sink.currentText()
-        s["resolution"] = self.f_res.currentText()
+        s["resolution"] = self.f_res.currentData() or "auto"
         s["display_mode"] = self.f_mode.currentData() or "auto"
         s["decoder"] = self.f_decoder.currentData() or "auto"
         s["keep_window"] = self.f_keep.isChecked()
