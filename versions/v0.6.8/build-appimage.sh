@@ -353,15 +353,17 @@ print('SLIM_SELFTEST_OK')" 2>&1) || true
 echo "$SELFTEST_OUT" | tail -n 8
 if echo "$SELFTEST_OUT" | grep -q "SLIM_SELFTEST_OK"; then
   echo "[build] 自检通过：瘦身后的 Qt 可用。"
-elif echo "$SELFTEST_OUT" | grep -Eq "libGL\.so|libEGL\.so|libX11\.so"; then
-  # 缺的是系统级图形库（Mesa 等），不是被我们删掉的 Qt 库：属于构建机缺依赖，
-  # 运行环境（桌面 Linux / Steam Deck）自带这些库，不应因此中断构建。
-  echo "[build] ⚠ 自检跳过：构建环境缺少系统图形库（libGL/libEGL/libX11），无法离屏启动 Qt。"
-  echo "        这是构建机缺依赖（apt install -y libgl1），不是瘦身删错了库；继续打包。"
-else
-  echo "[build] ✗ 瘦身自检失败：被删掉的 Qt 库/插件可能是必需的。"
-  echo "        请回退瘦身步骤（或把缺失模块加回保留列表）后再打包，不要发布这个产物。"
+elif echo "$SELFTEST_OUT" | grep -Eq "libQt6|No module named .PySide6"; then
+  # 瘦身只删 libQt6*.so* 与 PySide6 的模块/插件，所以报缺这两类 = 我们删错了，必须停下。
+  echo "[build] ✗ 瘦身自检失败：被删掉的 Qt 库/插件是必需的。"
+  echo "        请把缺失模块加回保留列表（或回退瘦身）后再打包，不要发布这个产物。"
   exit 1
+else
+  # 缺的是系统级依赖（Mesa / xkbcommon / X11 / xcb 等）——构建机缺包，
+  # 运行环境（桌面 Linux / Steam Deck）自带这些库，不应因此中断构建。
+  echo "[build] ⚠ 自检跳过：构建环境缺少系统图形/X11 依赖，无法离屏启动 Qt（见上方报错）。"
+  echo "        这属于构建机缺依赖（apt install libgl1 libxkbcommon0 libxcb-* 等），"
+  echo "        不是瘦身删错了库；继续打包，但建议补齐依赖后重跑以获得真实自检。"
 fi
 
 # ---------------------------------------------------------------------------

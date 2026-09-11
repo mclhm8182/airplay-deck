@@ -38,12 +38,17 @@ jobs:
           # python3 / python3-pip：build-appimage.sh 会把**系统解释器**整体拷进 AppDir，
           # 所以必须确保容器里有 python3.10（22.04 的系统版本）。libfuse2 是 appimagetool
           # 直接运行所需；容器里通常没有 /dev/fuse，脚本会自动回退到 --appimage-extract。
-          # libgl1：裸容器没有 Mesa，而 import QtWidgets 会链接 libGL.so.1；
-          #   打包前的「瘦身自检」要用 offscreen 真跑一遍 Qt，缺它会导致自检误报失败。
-          #   （运行环境桌面 Linux / Steam Deck 自带 Mesa，无需打进 AppImage。）
+          # libgl1 等 Qt/X 运行时：裸容器没有 Mesa、xkbcommon、xcb 等系统库，而
+          #   import QtWidgets 会链接它们；打包前的「瘦身自检」要用 offscreen 真跑一遍 Qt，
+          #   缺任何一个都会导致自检误报失败。（运行环境桌面 Linux / Steam Deck 自带这些库，
+          #   无需打进 AppImage。）
           apt-get install -y -qq --no-install-recommends \
             python3 python3-pip curl squashfs-tools file patchelf libfuse2 xz-utils \
-            libgl1 libglib2.0-0
+            libgl1 libglib2.0-0 libegl1 libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libfontconfig1 libx11-6 libxext6 libxrender1 libxi6 \
+            libsm6 libice6 libxcb1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 \
+            libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1
 
       - name: 构建 AppImage
         run: |
