@@ -218,9 +218,36 @@ def uxplay_ready(container: str) -> bool:
     return UXPLAY_VERSION in v
 
 
+def video_sink_ready(container: str) -> bool:
+    """容器内是否存在 ximagesink 渲染后端（uxplay 出画面必需）。
+
+    ★ 关键：ximagesink **不在** gstreamer1.0-plugins-base 里，而由独立包
+    ``gstreamer1.0-x`` 提供（libgstximagesink.so）。旧版安装清单漏装该包，
+    结果 uxplay 编译/启动都正常，一投屏就 ``no element "ximagesink"`` → 渲染器崩溃
+    （现象：搜得到、连得上、有声音、没画面）。故「环境是否就绪」必须连带查它，
+    否则点「安装/重建运行环境」会被判「已就绪」直接跳过、永远修不好。
+
+    探测失败（podman 不可用 / 容器未跑 / 异常）时返回 True——不能确定时不要凭空
+    判定「未就绪」，以免每次启动都弹安装引导。
+    """
+    if not podman_available():
+        return True
+    try:
+        r = subprocess.run(
+            ["podman", "exec", container, "bash", "-lc",
+             "command -v gst-inspect-1.0 >/dev/null 2>&1 && gst-inspect-1.0 ximagesink >/dev/null 2>&1"],
+            capture_output=True, text=True, timeout=25,
+        )
+        return r.returncode == 0
+    except Exception:
+        return True
+
+
 def is_ready(container: str) -> bool:
-    """运行环境是否就绪：容器存在且里面已装好**目标版本**的 uxplay。"""
-    return container_exists(container) and uxplay_ready(container)
+    """运行环境是否就绪：容器存在、uxplay 为目标版本、且 ximagesink 渲染后端可用。"""
+    return (container_exists(container)
+            and uxplay_ready(container)
+            and video_sink_ready(container))
 
 
 def _container_id(container: str) -> Optional[str]:
@@ -394,6 +421,49 @@ def _stream(cmd: list[str], log_fn: LogFn, timeout_total: float = 900.0) -> Tupl
     return rc, last_err
 
 
+def _repair_sink(container: str, log_fn: LogFn) -> Tuple[bool, str]:
+    """轻量修复：只补 GStreamer 渲染后端（`gstreamer1.0-x`）+ 清注册表缓存。
+
+    用于「uxplay 版本已正确、但容器里缺 ximagesink」的情形——不需要重新下载源码
+    编译（那要 1–3 分钟 + 联网），一次 apt 补包即可，几秒钟。
+    返回 (成功, 摘要)。
+    """
+    sh = (
+        "#!/bin/bash\n"
+        "# 抢回可能被孤儿 apt 抱住的 /var/cache/apt/archives/lock（同 install_sh 的 0) 步）\n"
+        "for _d in /proc/[0-9]*; do\n"
+        "  [ -r \"$_d/cmdline\" ] || continue\n"
+        "  _c=$(tr '\\0' ' ' < \"$_d/cmdline\" 2>/dev/null) || continue\n"
+        "  _p=${_d#/proc/}; [ \"$_p\" = \"$$\" ] && continue\n"
+        "  case \"${_c%% *}\" in\n"
+        "    */apt-get|apt-get|*/apt|apt|*/dpkg|dpkg|*/dpkg-query|dpkg-query)\n"
+        "      echo \"[repair] 清理残留 apt/dpkg 进程 $_p\"; kill -9 \"$_p\" 2>/dev/null ;;\n"
+        "  esac\n"
+        "done\n"
+        "sleep 1\n"
+        "dpkg --configure -a >/dev/null 2>&1 || true\n"
+        "apt-get -o DPkg::Lock::Timeout=600 update || true\n"
+        "# ★ ximagesink 由独立包 gstreamer1.0-x 提供（不在 plugins-base）\n"
+        "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y "
+        "gstreamer1.0-x gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-tools || true\n"
+        "# 清 GStreamer 注册表缓存：uxplay 经 podman 以宿主 /home/deck 运行，缓存落在那里\n"
+        "rm -rf /home/*/.cache/gstreamer-1.0 /root/.cache/gstreamer-1.0\n"
+        "command -v gst-inspect-1.0 >/dev/null 2>&1 && gst-inspect-1.0 ximagesink >/dev/null 2>&1\n"
+    )
+    if podman_available():
+        try:
+            subprocess.run(["podman", "start", container], capture_output=True, timeout=30)
+        except Exception:
+            pass
+        cmd = ["podman", "exec", "-u", "0", container, "bash", "-lc", sh]
+    else:
+        cmd = ["distrobox", "enter", container, "--", "sudo", "bash", "-lc", sh]
+    rc, err = _stream(cmd, log_fn, timeout_total=900.0)
+    if rc != 0:
+        return False, err or f"rc={rc}"
+    return True, "ximagesink 渲染后端已修复"
+
+
 def create_and_install(container: str, log_fn: LogFn) -> Tuple[bool, str]:
     """创建容器并安装 uxplay + GStreamer 全套。返回 (成功, 摘要)。"""
     if not distrobox_available() and not podman_available():
@@ -406,11 +476,20 @@ def create_and_install(container: str, log_fn: LogFn) -> Tuple[bool, str]:
     if not container_exists(container):
         log_fn("info", f"容器 {container} 不存在，开始创建")
     else:
-        if _container_usable(container) and uxplay_ready(container):
+        if _container_usable(container) and uxplay_ready(container) and video_sink_ready(container):
             log_fn("info", f"容器 {container} 已存在，uxplay {UXPLAY_VERSION} 就绪，跳过")
             return True, f"运行环境已就绪（容器 {container}）"
+        if _container_usable(container) and uxplay_ready(container):
+            # uxplay 版本没问题，只是缺渲染后端（多为旧版清单漏装 gstreamer1.0-x）
+            # → 走轻量修复，不重新下载/编译 uxplay。
+            log_fn("info", "uxplay 已就绪但 ximagesink 渲染后端缺失，执行轻量修复（补 gstreamer1.0-x + 清缓存）…")
+            ok, msg = _repair_sink(container, log_fn)
+            if ok and video_sink_ready(container):
+                log_fn("info", "渲染后端已修复，无需重新编译 uxplay")
+                return True, f"运行环境已就绪（容器 {container}）"
+            log_fn("warn", f"轻量修复未成功（{msg}），改为完整重装 uxplay…")
         if _container_usable(container):
-            log_fn("info", f"容器 {container} 已存在但 uxplay 未就绪，直接补装/升级…")
+            log_fn("info", f"容器 {container} 已存在但 uxplay/sink 未就绪，直接补装/升级…")
         else:
             log_fn("warn", f"容器 {container} 处于异常状态，强制删除后重建…")
             _force_remove_container(container, log_fn)
