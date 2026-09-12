@@ -20,7 +20,7 @@
 
 1. 前往 [Releases](https://github.com/mclhm8182/airplay-deck/releases) 下载 `AirPlayDeck-x86_64.AppImage`。
 2. 下载完成后直接打开即可，无需安装、单文件运行。
-3. 首次启动会引导你一键安装运行环境（约 1–3 分钟，需要联网拉取 Ubuntu 镜像并编译 UxPlay）。之后每次打开即用。
+3. 首次启动会引导你一键安装运行环境（约几分钟，需要联网拉取 Ubuntu 镜像并编译 UxPlay）。之后每次打开即用。
 
 AppImage 放在home 目录，SteamOS 系统更新不会清除它；运行环境容器也在home 目录，同样持久。
 
