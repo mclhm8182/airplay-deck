@@ -42,7 +42,6 @@ AppImage 放在home 目录，SteamOS 系统更新不会清除它；运行环境�
 | --- | --- | --- |
 | ![主界面](screenshots/main.png) | ![设备与设置](screenshots/settings.png) | ![关于](screenshots/about.png) |
 
-> 截图待补充：在 Steam Deck / Linux 桌面模式下运行本程序，截取上述三处界面，分别保存为 `screenshots/main.png`、`screenshots/settings.png`、`screenshots/about.png` 后提交即可。
 
 ## 设置说明
 
