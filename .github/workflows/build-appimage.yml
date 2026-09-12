@@ -94,17 +94,17 @@ jobs:
           ls -lh "$APPIMAGE"
 
           cat > /tmp/notes.md <<'EOF'
-          自动构建的正式版本（引擎：UxPlay 1.73.7，GPL-3.0）。
+          Automated build of the official release (engine: UxPlay 1.73.7, GPL-3.0).
 
-          ## 怎么用
+          ## How to use
 
-          1. 下载下面的 `.AppImage` 文件
-          2. 直接双击打开即可，无需安装
-          3. 首次启动会自动编译安装运行环境（约 1–3 分钟，需联网）
-          4. 打开后点「开始接收」，在 iPhone / iPad 控制中心「屏幕镜像」选本机
+          1. Download the `.AppImage` file below
+          2. Open it directly — no installation needed
+          3. On first launch the runtime is compiled and installed automatically (about 1–3 minutes, internet required)
+          4. Click "Start Receiving", then pick this device from "Screen Mirroring" in the iPhone / iPad Control Center
 
-          > 系统要求：x86_64 Linux（SteamOS 已验证），glibc >= 2.35。
-          > 游戏模式（SteamOS 全屏接管）暂未支持，请使用桌面模式。
+          > System requirements: x86_64 Linux (SteamOS verified), glibc >= 2.35.
+          > Game mode (full-screen takeover on SteamOS) is not yet supported — please use desktop mode.
           EOF
 
           # 已存在同名 tag 时 create 会失败，此时改为覆盖上传资产（--clobber）

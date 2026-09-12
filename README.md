@@ -34,6 +34,14 @@ AppImage 放在home 目录，SteamOS 系统更新不会清除它；运行环境�
 
 > 游戏模式（SteamOS 全屏接管）目前暂不支持，后续版本计划加入；当前请使用桌面模式。
 
+## 截图
+
+| 主界面 | 设备与设置 | 关于 |
+| --- | --- | --- |
+| ![主界面](screenshots/main.png) | ![设备与设置](screenshots/settings.png) | ![关于](screenshots/about.png) |
+
+> 截图待补充：在 Steam Deck / Linux 桌面模式下运行本程序，截取上述三处界面，分别保存为 `screenshots/main.png`、`screenshots/settings.png`、`screenshots/about.png` 后提交即可。
+
 ## 设置说明
 
 | 设置 | 默认 | 说明 |
@@ -75,21 +83,9 @@ podman exec -u 0 uxplay-env bash -lc "apt-get update && apt-get install -y gstre
 预编译包已通过 GitHub Actions 自动生成，绝大多数用户直接下载即可。如果你需要自己构建：
 
 - **在 Deck 的 distrobox 容器里构建**：把仓库源码放进 `~/airplay-deck/`，进入 `ubuntu:22.04` 容器后运行 `./build-appimage.sh`。
-- **用 GitHub Actions 构建**：把仓库推到 GitHub，推送 `main` 分支会自动触发构建并发布到 Releases。
+- **用 GitHub Actions 构建**：把仓库推到 GitHub，推送 `main` 分支会自动构建（产物在 Actions Artifacts，供你验证）；打好版本标签 `vX.Y.Z` 并推送后才会发布到 Releases。
 
 构建必须在 x86_64 Linux 上进行（AppImage 工具链仅支持 Linux，无法在 macOS 或 ARM 设备原生打包）。
-
-## 更新日志
-
-| 版本 | 要点 |
-| --- | --- |
-| v0.6.6 | 修游戏模式 X 鉴权根因；新增音频同步开关（默认直播式即时出声）；修短视频声音延迟 |
-| v0.6.5 | 修正 mDNS 误报；游戏模式 X cookie 权威定位；卡顿归因为 Wi-Fi 丢包 |
-| v0.6.4 | 容器内接入宿主 PipeWire 音频；游戏模式多 DISPLAY 探测；移除悬浮控制条 |
-| v0.6.3 | 容器内自建 dbus + avahi，根治搜不到设备 |
-| v0.6.2 | 容器内 mDNS / D-Bus 自动探测与修复 |
-| v0.6.1 | 修 ximagesink 缺失导致黑屏；桌面模式移除悬浮控制条 |
-| v0.6.0 | 引擎升级到自编译 UxPlay 1.73.7（含安全修复） |
 
 ## 说明
 

@@ -34,6 +34,14 @@ Audio sync defaults to "live" mode: sound keeps up instantly when scrolling shor
 
 > Game mode (full-screen takeover on SteamOS) is not supported yet, but is planned for a future release. For now, please use desktop mode.
 
+## Screenshots
+
+| Main window | Device & Settings | About |
+| --- | --- | --- |
+| ![Main window](screenshots/main.png) | ![Device & Settings](screenshots/settings.png) | ![About](screenshots/about.png) |
+
+> Screenshots to be added: run the app in desktop mode on Steam Deck / Linux, capture the three screens above, and save them as `screenshots/main.png`, `screenshots/settings.png`, and `screenshots/about.png`, then commit.
+
 ## Settings
 
 | Setting | Default | Description |
@@ -75,21 +83,9 @@ podman exec -u 0 uxplay-env bash -lc "apt-get update && apt-get install -y gstre
 Prebuilt packages are generated automatically via GitHub Actions, so most users just download. If you need to build it yourself:
 
 - **In a distrobox container on the Deck**: put the repo source into `~/airplay-deck/`, enter an `ubuntu:22.04` container, and run `./build-appimage.sh`.
-- **With GitHub Actions**: push the repo to GitHub; pushing the `main` branch triggers the build and publishes to Releases automatically.
+- **With GitHub Actions**: push the repo to GitHub; pushing `main` triggers a build (artifact in Actions, for verification). Push a `vX.Y.Z` tag to publish a Release.
 
 Building must happen on x86_64 Linux (the AppImage toolchain is Linux-only and cannot natively package on macOS or ARM devices).
-
-## Changelog
-
-| Version | Highlights |
-| --- | --- |
-| v0.6.6 | Fixed the root cause of game-mode X auth; added audio-sync toggle (live audio by default); fixed short-video audio delay |
-| v0.6.5 | Fixed mDNS false alarm; authoritative game-mode X cookie location; attributed stutter to Wi-Fi loss |
-| v0.6.4 | Connected host PipeWire audio in container; multi-DISPLAY probing for game mode; removed floating bar |
-| v0.6.3 | Self-hosted dbus + avahi in container, fixing undiscoverable devices |
-| v0.6.2 | Automatic container mDNS / D-Bus detection and repair |
-| v0.6.1 | Fixed ximagesink-missing black screen; removed desktop floating bar |
-| v0.6.0 | Upgraded engine to self-compiled UxPlay 1.73.7 (with security fixes) |
 
 ## Notes
 
