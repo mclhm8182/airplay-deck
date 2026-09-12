@@ -1,97 +1,99 @@
 # AirPlay Deck
 
-> English version: [README_EN.md](README_EN.md)
+> 中文版：[README_zh.md](README_zh.md)
 
-把 Steam Deck 变成 AirPlay 接收端，让 iPhone、iPad一键镜像投屏。其他的 Linux 系统请自行尝试，不保证一定可用。
+Turn your Steam Deck (or any Linux desktop) into an AirPlay receiver, so iPhone and iPad can mirror their screens with one tap.
 
-本程序基于成熟的 [UxPlay](https://github.com/FDH2/UxPlay) 引擎（自编译 1.73.7），在AI 辅助下完成，提供图形界面、一键启动与可调设置，开箱即用。
+AirPlay Deck wraps the mature [UxPlay](https://github.com/FDH2/UxPlay) engine (self-compiled 1.73.7). Built with AI assistance, it provides a graphical interface with one-click start and adjustable settings, and works out of the box.
 
-## 功能特性
+> **Disclaimer:** This is an experimental, AI-assisted hobby project. It is not affiliated with, endorsed by, or sponsored by Apple Inc., and AirPlay is a trademark of Apple. It wraps the third-party [UxPlay](https://github.com/FDH2/UxPlay) engine (GPL-3.0) for personal use. Things may break and features can change, so use it at your own risk. Feedback and contributions are very welcome.
 
-- 一键镜像：打开即用，在 iPhone / iPad 控制中心「屏幕镜像」里选择本机即可连接
-- 桌面模式稳定可用；游戏模式暂未支持，后续版本计划加入
-- 首次启动自动编译安装运行环境（distrobox 容器），无需手动装包
-- 音频、分辨率、帧率、显示模式均可调
-- 图形界面支持 8 种语言（简体中文、繁體中文、English、日本語、한국어、Français、Deutsch、Español），并跟随系统自动切换
+## Features
 
-## 安装（下载即用）
+- One-click mirroring: open the app and connect from the iPhone / iPad Control Center "Screen Mirroring"
+- Desktop mode is stable; Game mode is not supported yet but planned for a future release
+- The runtime environment (a distrobox container) is compiled and installed automatically on first launch — no manual package setup
+- Audio, resolution, frame rate, and display mode are all adjustable
+- The GUI is available in 8 languages (Simplified Chinese, Traditional Chinese, English, Japanese, Korean, French, German, Spanish) and follows the system language automatically
 
-1. 前往 [Releases](https://github.com/mclhm8182/airplay-deck/releases) 下载 `AirPlayDeck-x86_64.AppImage`。
-2. 下载完成后直接打开即可，无需安装、单文件运行。
-3. 首次启动会引导你一键安装运行环境（约 1–3 分钟，需要联网拉取 Ubuntu 镜像并编译 UxPlay）。之后每次打开即用。
+## Installation (download and run)
 
-AppImage 放在home 目录，SteamOS 系统更新不会清除它；运行环境容器也在home 目录，同样持久。
+1. Download `AirPlayDeck-x86_64.AppImage` from [Releases](https://github.com/mclhm8182/airplay-deck/releases).
+2. Open the file directly after download — no installation needed, it is a single self-contained file.
+3. The first launch guides you through a one-click environment setup (about 1–3 minutes, requires internet to pull the Ubuntu image and compile UxPlay). After that, just open it each time.
 
-## 使用
+The AppImage lives in your home directory, so SteamOS system updates won't remove it; the runtime container is also in your home directory and persists as well.
 
-1. 打开 AirPlay Deck，点击「开始接收」。
-2. 在 iPhone / iPad 的控制中心打开「屏幕镜像」，选择本机即可开始投屏。
-3. 画面以默认以窗口形式呈现，可随时用任务栏或切回本程序。也可以自主设置为全屏模式。
+## Usage
 
-**关于音频**
+1. Open AirPlay Deck and click "Start Receiving".
+2. Open "Screen Mirroring" in the iPhone / iPad Control Center and pick this device to begin mirroring.
+3. The picture shows up as a window; switch back to the app anytime with the taskbar or `Alt+Tab`. You can also set it to fullscreen in Settings.
 
-默认开启「直播式」音频同步：刷短视频、玩游戏时声音即时跟上，不会在切换内容时延迟几秒。如果你用来看电影、希望音画严格对齐，可在「视频与渲染」里打开「音频同步」。
+**About audio**
 
-> 游戏模式（SteamOS 全屏接管）目前暂不支持，后续版本计划加入；当前请使用桌面模式。
+Audio sync defaults to "live" mode: sound keeps up instantly when scrolling short videos or gaming, without the few-second delay that appears when content switches. If you watch movies and want strict audio-video alignment, turn on "Audio sync" under "Video & Rendering".
 
-## 截图
+> Game mode (full-screen takeover on SteamOS) is not supported yet, but is planned for a future release. For now, please use desktop mode.
 
-| 主界面 | 设备与设置 | 关于 |
+## Screenshots
+
+| Main window | Device & Settings | About |
 | --- | --- | --- |
-| ![主界面](screenshots/main.png) | ![设备与设置](screenshots/settings.png) | ![关于](screenshots/about.png) |
+| ![Main window](screenshots/main.png) | ![Device & Settings](screenshots/settings.png) | ![About](screenshots/about.png) |
 
-> 截图待补充：在 Steam Deck / Linux 桌面模式下运行本程序，截取上述三处界面，分别保存为 `screenshots/main.png`、`screenshots/settings.png`、`screenshots/about.png` 后提交即可。
+> Screenshots to be added: run the app in desktop mode on Steam Deck / Linux, capture the three screens above, and save them as `screenshots/main.png`, `screenshots/settings.png`, and `screenshots/about.png`, then commit.
 
-## 设置说明
+## Settings
 
-| 设置 | 默认 | 说明 |
+| Setting | Default | Description |
 | --- | --- | --- |
-| 视频后端 | ximagesink | 纯 X11 渲染，不依赖 OpenGL，在 Xwayland / gamescope 下最稳定 |
-| 帧率 | 30 | 仅 30 / 60 两档；自由填值可能导致部分 App 投屏卡死 |
-| 显示模式 | 窗口 | 窗口：可拖动小窗；全屏：无边框铺满；自动：程序自动选择 |
-| 分辨率 | 自动 | 自动时向设备请求 1280×800（Deck 原生）流，画面铺满且不裁切 |
-| 音频同步 | 关 | 关：直播式即时出声；开：基于时间戳的严格音画同步（适合看电影） |
-| 投屏时保持屏幕常亮 | 开 | 连接期间阻止系统熄屏 |
-| 通过容器运行 | 开 | 复用 uxplay-env 容器，首次启动自动安装（默认开启） |
+| Video sink | ximagesink | Pure X11 rendering, no OpenGL dependency; most stable under Xwayland / gamescope |
+| Frame rate | 30 | Only 30 / 60; arbitrary values can freeze mirroring in some apps |
+| Display mode | Window | Window: draggable small window; Fullscreen: borderless fill; Auto: app chooses per session |
+| Resolution | Auto | Auto requests a 1280×800 (Deck native) stream, filling the screen without cropping |
+| Audio sync | Off | Off: live-style instant audio; On: timestamp-based strict A/V sync (good for movies) |
+| Keep screen awake while mirroring | On | Prevents system sleep during a session |
+| Run via container | On | Reuses the uxplay-env container, installed automatically on first launch; off requires uxplay installed natively |
 
-## 常见问题
+## FAQ
 
-**AppImage 双击没反应**
-多数情况是程序内部报错，不是 FUSE 问题。请在桌面模式的终端里直接运行 `./AirPlayDeck-x86_64.AppImage` 查看完整报错。
+**The AppImage does nothing when double-clicked**
+Most often it is an in-app error, not a FUSE problem. Run `./AirPlayDeck-x86_64.AppImage` directly in a terminal in desktop mode to see the full error.
 
-**手机搜不到设备**
-通常是 avahi（mDNS）没有正常启动。App 启动时会等待 avahi 就绪；若长时间搜不到，可在终端确认宿主 `systemctl status avahi-daemon`。容器内的 mDNS 由 App 自动维护，一般不需要手动处理。
+**Phone can't find the device**
+Usually avahi (mDNS) isn't running. The app waits for avahi on startup; if the device stays undiscoverable for a long time, check the host with `systemctl status avahi-daemon` in a terminal. mDNS inside the container is maintained automatically by the app and rarely needs manual attention.
 
-**有声音没画面，或只有画面没声音**
-- 没画面：确认视频后端是 ximagesink（默认即是），且本程序是从桌面环境打开（双击 AppImage 或桌面启动器），而不是在无法访问图形界面的纯命令行终端（如 SSH）里运行。
-- 没声音：SteamOS 的声音走 PipeWire，App 会自动把容器接入宿主的 PulseAudio 兼容接口，通常无需设置。可在日志里搜索 `音频已接入宿主机 PulseAudio` 确认。
+**Sound but no picture, or picture but no sound**
+- No picture: make sure the video sink is ximagesink (the default), and that the app was launched from the desktop environment (double-click the AppImage or use a desktop launcher), not from a headless command-line terminal such as SSH that has no access to a graphical display.
+- No sound: SteamOS routes audio through PipeWire; the app automatically connects the container to the host's PulseAudio-compatible interface, usually with no setup. Confirm by searching the log for `音频已接入宿主机 PulseAudio` (host PulseAudio connected).
 
-**画面卡顿、不流畅**
-先看日志是否出现 `raop_rtp resend failed` 或 `since last client feedback request`——这两行一起出现说明是 Wi-Fi 丢包，不是性能问题。按优先级排查：手机与 Deck 都连 5GHz 并靠近路由器；关闭路由器的省电模式和手机的低电量模式；视频后端保持 ximagesink；网络不稳时把帧率调回 30；分辨率保持自动。
+**Choppy / laggy playback**
+Check the log for `raop_rtp resend failed` or `since last client feedback request` together — that indicates Wi-Fi packet loss, not a performance issue. Troubleshoot in order: connect phone and Deck to 5GHz and keep them near the router; turn off router power-saving and the phone's Low Power Mode; keep the video sink as ximagesink; drop frame rate back to 30 if the network is unstable; keep resolution on Auto.
 
-**安装运行环境失败**
-先在「检查与日志」页点「安装 / 重建运行环境」。若因网络拉不到 UxPlay 源码（国内网络常见），可在能联网的环境下载 [v1.73.7 源码包](https://github.com/FDH2/UxPlay/archive/refs/tags/v1.73.7.tar.gz)，存为 Deck home 目录下的 `~/uxplay-1.73.7.tar.gz` 再重试，脚本会优先使用本地包。
+**Environment setup failed**
+First try "Install / Rebuild environment" on the "Check & Logs" page. If UxPlay source can't be fetched (common on some networks), download the [v1.73.7 source tarball](https://github.com/FDH2/UxPlay/archive/refs/tags/v1.73.7.tar.gz) from a network that works, save it as `~/uxplay-1.73.7.tar.gz` in your Deck home, then retry — the script prefers the local archive.
 
-**日志出现 `no element "ximagesink"`，或一直连上却没画面**
-说明容器里缺 `gstreamer1.0-x` 包。在终端运行一次即可修复（无需重装 AppImage）：
+**Log shows `no element "ximagesink"`, or it connects but never shows a picture**
+The container is missing the `gstreamer1.0-x` package. Run this once to fix it (no need to reinstall the AppImage):
 ```bash
 podman exec -u 0 uxplay-env bash -lc "apt-get update && apt-get install -y gstreamer1.0-x gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-tools && rm -rf /home/*/.cache/gstreamer-1.0 /root/.cache/gstreamer-1.0 && gst-inspect-1.0 ximagesink"
 ```
 
-## 从源码构建（可选）
+## Building from source (optional)
 
-预编译包已通过 GitHub Actions 自动生成，绝大多数用户直接下载即可。如果你需要自己构建：
+Prebuilt packages are generated automatically via GitHub Actions, so most users just download. If you need to build it yourself:
 
-- **在 Deck 的 distrobox 容器里构建**：把仓库源码放进 `~/airplay-deck/`，进入 `ubuntu:22.04` 容器后运行 `./build-appimage.sh`。
-- **用 GitHub Actions 构建**：把仓库推到 GitHub，推送 `main` 分支会自动构建（产物在 Actions Artifacts，供你验证）；打好版本标签 `vX.Y.Z` 并推送后才会发布到 Releases。
+- **In a distrobox container on the Deck**: put the repo source into `~/airplay-deck/`, enter an `ubuntu:22.04` container, and run `./build-appimage.sh`.
+- **With GitHub Actions**: push the repo to GitHub; pushing `main` triggers a build (artifact in Actions, for verification). Push a `vX.Y.Z` tag to publish a Release.
 
-构建必须在 x86_64 Linux 上进行（AppImage 工具链仅支持 Linux，无法在 macOS 或 ARM 设备原生打包）。
+Building must happen on x86_64 Linux (the AppImage toolchain is Linux-only and cannot natively package on macOS or ARM devices).
 
-## 说明
+## Notes
 
-- 本项目在 AI 辅助下完成（vibe coding）。代码与文档均开源，欢迎提交 issue 和 PR。
-- 投屏引擎基于 [UxPlay](https://github.com/FDH2/UxPlay)（GPL-3.0 许可）等开源项目，在此致谢。
+- This project was built with AI assistance (vibe coding). Both code and docs are open source; issues and PRs are welcome.
+- The mirroring engine is based on [UxPlay](https://github.com/FDH2/UxPlay) (GPL-3.0 license) and other open-source projects; credit goes to them.
 
-## 许可证
+## License
 
-本程序自身以 MIT 许可证发布。需说明：随附的投屏引擎 [UxPlay](https://github.com/FDH2/UxPlay) 为 GPL-3.0，PySide6（LGPL v3）、GStreamer（LGPL）等运行依赖亦采用相应开源许可证。
+This program is released under the MIT License. Note: the bundled mirroring engine [UxPlay](https://github.com/FDH2/UxPlay) is GPL-3.0, and runtime dependencies such as PySide6 (LGPL v3) and GStreamer (LGPL) are covered by their own open-source licenses.
