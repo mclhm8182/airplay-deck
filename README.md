@@ -20,7 +20,7 @@ AirPlay Deck wraps the mature [UxPlay](https://github.com/FDH2/UxPlay) engine (s
 
 1. Download `AirPlayDeck-x86_64.AppImage` from [Releases](https://github.com/mclhm8182/airplay-deck/releases).
 2. Open the file directly after download — no installation needed, it is a single self-contained file.
-3. The first launch guides you through a one-click environment setup (about 1–3 minutes, requires internet to pull the Ubuntu image and compile UxPlay). After that, just open it each time.
+3. The first launch guides you through a one-click environment setup (about several minutes, requires internet to pull the Ubuntu image and compile UxPlay). After that, just open it each time.
 
 The AppImage lives in your home directory, so SteamOS system updates won't remove it; the runtime container is also in your home directory and persists as well.
 
