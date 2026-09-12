@@ -42,8 +42,6 @@ Audio sync defaults to "live" mode: sound keeps up instantly when scrolling shor
 | --- | --- | --- |
 | ![Main window](screenshots/main.png) | ![Device & Settings](screenshots/settings.png) | ![About](screenshots/about.png) |
 
-> Screenshots to be added: run the app in desktop mode on Steam Deck / Linux, capture the three screens above, and save them as `screenshots/main.png`, `screenshots/settings.png`, and `screenshots/about.png`, then commit.
-
 ## Settings
 
 | Setting | Default | Description |
