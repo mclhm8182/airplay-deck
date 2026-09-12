@@ -1,14 +1,15 @@
 name: Build AirPlay Deck AppImage
 
-# 在 GitHub 的 x86_64 Linux runner 上自动构建 AppImage，
-# 无需本地 Linux / Docker / macOS。构建完成后：
-#   · Actions 页面的 Artifacts 里可下载（保留 90 天）；
-#   · 同时自动发布/更新一个正式 Release，把 AppImage 直接挂在里面——
-#     想拿到文件时去 Releases 页点一下最省事，不用解压 artifact zip。
+# 在 GitHub 的 x86_64 Linux runner 上自动构建 AppImage，无需本地 Linux / Docker / macOS。
+# 发布流程分两步（解耦：先验证、再发版）：
+#   · 推送到 main / master：只构建并上传到 Actions Artifacts（保留 90 天），供你私下下载验证，不建 Release；
+#   · 推送 v* 标签（如 v0.6.10）：构建完成后自动发布正式 Release，把 AppImage 挂在里面——
+#     想发版时，先验证 main 上的 dev 包，确认无误再 `git tag vX.Y.Z && git push --tags`。
 on:
-  workflow_dispatch:        # 允许在 GitHub 网页手动触发
+  workflow_dispatch:        # 允许在 GitHub 网页手动触发（仅构建，不发版）
   push:
-    branches: [main, master]
+    branches: [main, master]   # 仅构建 + 上传 Artifact，供私下验证
+    tags: ['v*']               # 构建 + 自动发布正式 Release
 
 jobs:
   build:
@@ -65,6 +66,8 @@ jobs:
 
   release:
     needs: build
+    # 只在推送 v* 标签时发布；推 main 时本 job 跳过（留给用户先验证 dev 包）。
+    if: startsWith(github.ref, 'refs/tags/v')
     # 这一步不需要 22.04 容器——只是把文件挂到 Release 上，用宿主 runner 自带的 gh 即可。
     runs-on: ubuntu-24.04
     permissions:
