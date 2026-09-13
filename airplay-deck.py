@@ -34,7 +34,7 @@ from core import i18n
 from core import container as cman
 from core import avahi
 
-APP_VERSION = "0.7.1"
+APP_VERSION = "0.7.2"
 APP_TITLE = "AirPlay Deck"
 
 # 界面主题配色（深色 / 浅色两套）。_apply_qss 按当前主题取一套填进样式表模板，
@@ -356,6 +356,13 @@ class MainWindow(QMainWindow):
         self._build_pages()
         self.bridge.log_signal.connect(self._on_log)
         self.bridge.status_signal.connect(self._on_status)
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.applicationStateChanged.connect(self._on_app_state_changed)
+        except Exception:
+            pass
+        self._append_file_log("info", f"log file: {cfg.LOG_FILE}")
         self._setup_tray()
         # 主题为「自动」时跟随系统深浅色：KDE/GNOME 切换深浅色时立即重刷样式。
         # 老版本 Qt 没有 colorSchemeChanged，连不上就算了（自动模式会回退深色）。
@@ -678,14 +685,17 @@ class MainWindow(QMainWindow):
         self.f_autostart.setChecked(bool(self.settings.get("autostart")))
         form.addRow(self._form_label(""), self.f_autostart)
 
-        # 可选 PIN：默认关闭；勾选后才启用 4 位数字输入（UxPlay -pin）
+        # 可选 PIN：默认关闭；勾选后自动生成 4 位随机数（只读展示）
         self.f_pin_enable = QCheckBox(self.T("pin_enable"))
         self.f_pin_enable.setChecked(bool(self.settings.get("pin_enabled")))
-        self.f_pin = QLineEdit(str(self.settings.get("pin_code") or ""))
-        self.f_pin.setPlaceholderText(self.T("pin_ph"))
-        self.f_pin.setMaxLength(4)
-        self.f_pin.setInputMask("0000")
-        self.f_pin.setEnabled(self.f_pin_enable.isChecked())
+        self._pin_code = "".join(ch for ch in str(self.settings.get("pin_code") or "") if ch.isdigit())[:4]
+        self.f_pin_label = QLabel()
+        self.f_pin_label.setObjectName("bigStatus")
+        self.f_pin_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.btn_pin_regen = QPushButton(self.T("pin_regen"))
+        self.btn_pin_regen.setMinimumHeight(36)
+        self.btn_pin_regen.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pin_regen.clicked.connect(self._regen_pin)
         self.f_pin_hint = QLabel(self.T("pin_hint"))
         self.f_pin_hint.setObjectName("hint")
         self.f_pin_hint.setWordWrap(True)
@@ -694,10 +704,12 @@ class MainWindow(QMainWindow):
         _pin_v.setContentsMargins(0, 0, 0, 0)
         _pin_v.setSpacing(4)
         _pin_v.addWidget(self.f_pin_enable)
-        _pin_v.addWidget(self.f_pin)
+        _pin_v.addWidget(self.f_pin_label)
+        _pin_v.addWidget(self.btn_pin_regen)
         _pin_v.addWidget(self.f_pin_hint)
         form.addRow(self._form_label(self.T("pin_label")), _pin_box)
-        self.f_pin_enable.toggled.connect(self.f_pin.setEnabled)
+        self.f_pin_enable.toggled.connect(self._on_pin_enable_toggled)
+        self._refresh_pin_widgets()
 
         self._lang_combo = QComboBox()
         self._lang_combo.addItem(self.T("lang_auto"), "auto")
@@ -725,6 +737,36 @@ class MainWindow(QMainWindow):
         body.addWidget(self._make_save_button())
         body.addStretch(1)
         return page
+
+
+    @staticmethod
+    def _random_pin() -> str:
+        import random
+        return f"{random.randint(0, 9999):04d}"
+
+    def _refresh_pin_widgets(self) -> None:
+        on = bool(getattr(self, "f_pin_enable", None) and self.f_pin_enable.isChecked())
+        if getattr(self, "btn_pin_regen", None) is not None:
+            self.btn_pin_regen.setEnabled(on)
+        if getattr(self, "f_pin_label", None) is None:
+            return
+        if on and len(getattr(self, "_pin_code", "") or "") == 4:
+            self.f_pin_label.setText(self.T("pin_current", pin=self._pin_code))
+        else:
+            self.f_pin_label.setText(self.T("pin_value_empty"))
+
+    def _on_pin_enable_toggled(self, checked: bool) -> None:
+        if checked:
+            if len(getattr(self, "_pin_code", "") or "") != 4:
+                self._pin_code = self._random_pin()
+        self._refresh_pin_widgets()
+
+    def _regen_pin(self) -> None:
+        if not self.f_pin_enable.isChecked():
+            return
+        self._pin_code = self._random_pin()
+        self._refresh_pin_widgets()
+        self._flash_saved(self.T("pin_current", pin=self._pin_code))
 
     def _on_lang_changed(self, _idx: int):
         if self._rebuilding or self._lang_combo is None:
@@ -936,6 +978,11 @@ class MainWindow(QMainWindow):
         ah2 = QHBoxLayout(actions2)
         ah2.setContentsMargins(0, 0, 0, 0)
         ah2.setSpacing(10)
+        self.log_path_lbl = QLabel(self.T("log_path_hint", path=str(cfg.LOG_FILE)))
+        self.log_path_lbl.setObjectName("hint")
+        self.log_path_lbl.setWordWrap(True)
+        self.log_path_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        body.addWidget(self.log_path_lbl)
         self.btn_export = QPushButton(self.T("btn_export"))
         self.btn_export.setMinimumHeight(44)
         self.btn_export.clicked.connect(self._export_log)
@@ -1170,9 +1217,13 @@ class MainWindow(QMainWindow):
         self.f_append.setChecked(bool(s.get("append_hostname")))
         self.f_autostart.setChecked(bool(s.get("autostart")))
         if getattr(self, "f_pin_enable", None) is not None:
+            self._pin_code = "".join(ch for ch in str(s.get("pin_code") or "") if ch.isdigit())[:4]
+            self.f_pin_enable.blockSignals(True)
             self.f_pin_enable.setChecked(bool(s.get("pin_enabled")))
-            self.f_pin.setText(str(s.get("pin_code") or ""))
-            self.f_pin.setEnabled(self.f_pin_enable.isChecked())
+            self.f_pin_enable.blockSignals(False)
+            if self.f_pin_enable.isChecked() and len(self._pin_code) != 4:
+                self._pin_code = self._random_pin()
+            self._refresh_pin_widgets()
         i = self.f_fps.findData(int(s.get("fps", 30) or 30))
         self.f_fps.setCurrentIndex(max(0, i))
         self.f_sink.setCurrentText(s.get("video_sink", "ximagesink"))
@@ -1256,9 +1307,12 @@ class MainWindow(QMainWindow):
         if not self._ensure_env_ready():
             return
         self._save(silent=True)  # 启动前先把当前表单落盘
+        def _log_from_worker(lvl, msg):
+            MainWindow._append_file_log(lvl, msg)
+            self.bridge.log_signal.emit(lvl, msg)
         self.launcher = launcher.Launcher(
             self.settings,
-            log_cb=lambda lvl, msg: self.bridge.log_signal.emit(lvl, msg),
+            log_cb=_log_from_worker,
             status_cb=lambda st: self.bridge.status_signal.emit(st),
         )
         self.launcher.start()
@@ -1282,6 +1336,37 @@ class MainWindow(QMainWindow):
         self.toggle.setChecked(True)
         self._start()
 
+    def _on_app_state_changed(self, state):
+        """Game Mode 熄屏再亮后，强制刷新，避免整窗黑死。"""
+        try:
+            if state != Qt.ApplicationState.ApplicationActive:
+                return
+        except Exception:
+            return
+        self._append_file_log("info", "app became active — forcing UI refresh")
+        try:
+            from core import keepalive as _ka
+            _ka.one_shot_wake(log=lambda lvl, m: self._append_file_log(lvl, m))
+        except Exception:
+            pass
+        QTimer.singleShot(50, self._recover_ui_after_wake)
+
+    def _recover_ui_after_wake(self):
+        try:
+            self.show()
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            self.repaint()
+            try:
+                self._apply_qss()
+            except Exception:
+                pass
+            self.update()
+            self._append_file_log("info", "UI refresh after wake done")
+        except Exception as e:
+            self._append_file_log("error", f"UI refresh after wake failed: {e}")
+
     def _show_window(self):
         self.showNormal()
         self.raise_()
@@ -1289,26 +1374,42 @@ class MainWindow(QMainWindow):
 
     # ---- 回调槽 ------------------------------------------------------------- #
     def _on_log(self, level: str, msg: str):
+        # 先落盘再刷新 UI：界面黑屏/控件异常时也不能丢掉日志
+        self._append_file_log(level, msg)
+        try:
+            self._log_buffer.append(f"[{level}] {msg}")
+            if len(self._log_buffer) > 500:
+                self._log_buffer = self._log_buffer[-500:]
+        except Exception:
+            pass
         color = {
             "info": "#8b949e", "warn": "#d29922", "error": "#f85149",
             "cmd": "#58a6ff", "exit": "#8b949e", "uxplay": "#c9d1d9",
         }.get(level, "#c9d1d9")
         try:
             self.log.append(f'<span style="color:{color}">[{level}] {msg}</span>')
-        except Exception:
-            return
-        self._log_buffer.append(f"[{level}] {msg}")
-        if len(self._log_buffer) > 500:
-            self._log_buffer = self._log_buffer[-500:]
-        # 落盘持久日志：游戏模式窗口会被隐藏，回桌面后仍能从文件读到当时输出
-        try:
-            cfg.LOG_DIR.mkdir(parents=True, exist_ok=True)
-            with open(cfg.LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(f"[{level}] {msg}\n")
+            if self.log.document().blockCount() > 500:
+                self.log.clear()
         except Exception:
             pass
-        if self.log.document().blockCount() > 500:
-            self.log.clear()
+
+    @staticmethod
+    def _append_file_log(level: str, msg: str) -> None:
+        """黑屏/强杀前尽可能把日志刷到磁盘。"""
+        try:
+            from datetime import datetime
+            cfg.LOG_DIR.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            line = "%s [%s] %s" % (ts, level, msg) + chr(10)
+            with open(cfg.LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _log(self, level: str, msg: str):
         self._on_log(level, msg)
@@ -1346,7 +1447,14 @@ class MainWindow(QMainWindow):
         s["autostart"] = self.f_autostart.isChecked()
         if getattr(self, "f_pin_enable", None) is not None:
             s["pin_enabled"] = self.f_pin_enable.isChecked()
-            s["pin_code"] = "".join(ch for ch in self.f_pin.text() if ch.isdigit())[:4]
+            if s["pin_enabled"]:
+                pin = "".join(ch for ch in str(getattr(self, "_pin_code", "") or "") if ch.isdigit())[:4]
+                if len(pin) != 4:
+                    pin = self._random_pin()
+                    self._pin_code = pin
+                s["pin_code"] = pin
+            else:
+                s["pin_code"] = "".join(ch for ch in str(getattr(self, "_pin_code", "") or "") if ch.isdigit())[:4]
         s["fps"] = int(self.f_fps.currentData() or 30)
         s["video_sink"] = self.f_sink.currentText()
         s["resolution"] = self.f_res.currentData() or "auto"
@@ -1371,11 +1479,15 @@ class MainWindow(QMainWindow):
         if collected.get("pin_enabled"):
             pin = "".join(ch for ch in str(collected.get("pin_code") or "") if ch.isdigit())
             if len(pin) != 4:
-                if not silent:
-                    self._flash_saved(self.T("pin_invalid"))
-                self._log("error", self.T("pin_invalid"))
-                return
-            collected["pin_code"] = pin
+                pin = self._random_pin()
+                self._pin_code = pin
+                collected["pin_code"] = pin
+                try:
+                    self._refresh_pin_widgets()
+                except Exception:
+                    pass
+            else:
+                collected["pin_code"] = pin
         self.settings = collected
         try:
             cfg.save_settings(self.settings)
@@ -1423,6 +1535,10 @@ class MainWindow(QMainWindow):
         if ok and code in ("added", "steamos_ok"):
             QMessageBox.information(self, self.T("btn_add_steam"), self.T("steam_add_ok"))
             self._log("info", f"add_to_steam: {code}")
+            return
+        if ok and code == "updated":
+            QMessageBox.information(self, self.T("btn_add_steam"), self.T("steam_add_updated"))
+            self._log("info", "add_to_steam: updated")
             return
         if ok and code == "already":
             QMessageBox.information(self, self.T("btn_add_steam"), self.T("steam_add_already"))
