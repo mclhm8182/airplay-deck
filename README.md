@@ -11,7 +11,7 @@ AirPlay Deck wraps the mature [UxPlay](https://github.com/FDH2/UxPlay) engine (s
 ## Features
 
 - One-click mirroring: open the app and connect from the iPhone / iPad Control Center "Screen Mirroring"
-- Desktop mode is stable; Game mode is not supported yet but planned for a future release
+- Desktop mode is stable and recommended; Game Mode has experimental X11 auth fixes (match container uid to the Deck user, prefer cookie fallback over unset) but is **not fully supported** yet
 - The runtime environment (a distrobox container) is compiled and installed automatically on first launch — no manual package setup
 - Audio, resolution, frame rate, and display mode are all adjustable
 - The GUI is available in 8 languages (Simplified Chinese, Traditional Chinese, English, Japanese, Korean, French, German, Spanish) and follows the system language automatically
@@ -34,7 +34,7 @@ The AppImage lives in your home directory, so SteamOS system updates won't remov
 
 Audio sync defaults to "live" mode: sound keeps up instantly when scrolling short videos or gaming, without the few-second delay that appears when content switches. If you watch movies and want strict audio-video alignment, turn on "Audio sync" under "Video & Rendering".
 
-> Game mode (full-screen takeover on SteamOS) is not supported yet, but is planned for a future release. For now, please use desktop mode.
+> Game Mode (full-screen takeover on SteamOS) remains experimental: this branch improves X11 authorization inside the container (run as the host uid, clearer probe errors, cookie fallback). Desktop Mode is still the reliable path; Game Mode may still fail depending on gamescope / Steam LD_PRELOAD.
 
 ## Screenshots
 
@@ -77,6 +77,9 @@ The container is missing the `gstreamer1.0-x` package. Run this once to fix it (
 ```bash
 podman exec -u 0 uxplay-env bash -lc "apt-get update && apt-get install -y gstreamer1.0-x gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-tools && rm -rf /home/*/.cache/gstreamer-1.0 /root/.cache/gstreamer-1.0 && gst-inspect-1.0 ximagesink"
 ```
+
+**Game Mode: connects / has sound but no picture, or log shows Authorization required**
+SteamOS Game Mode runs Xwayland as the Deck user (uid 1000) while the container may default to root. Recent builds run X probes and uxplay as the host uid/gid and avoid falling back to `unset XAUTHORITY` when a cookie is available. If it still fails, export logs from "Check & Logs" (look for host libX11 probe + container uid) and use Desktop Mode.
 
 ## Building from source (optional)
 
