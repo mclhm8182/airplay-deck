@@ -83,6 +83,8 @@ class Launcher:
             last_err = None
             for cmd in (
                 ["systemd-inhibit", "--what=idle:sleep", "--mode=block",
+                 "--who=AirPlayDeck", "--why=" + why, "sleep", "infinity"],
+                ["systemd-inhibit", "--what=idle:sleep", "--mode=block",
                  "--why=" + why, "sleep", "infinity"],
                 base,
             ):
@@ -124,9 +126,13 @@ class Launcher:
             is_gm = session.is_gamemode()
             preferred = self._active_display or os.environ.get("DISPLAY")
             displays = keepalive.resolve_displays(preferred=preferred)
+            interval = (
+                getattr(keepalive, "GAMEMODE_INTERVAL_SEC", 10.0)
+                if is_gm else keepalive.DEFAULT_INTERVAL_SEC
+            )
             self._keepalive = keepalive.DisplayKeepalive(
                 displays=displays,
-                interval=keepalive.DEFAULT_INTERVAL_SEC,
+                interval=interval,
                 log=self._log,
                 gamemode=is_gm,
             )
