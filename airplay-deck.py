@@ -29,12 +29,12 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QMenu, QMessageBox, QFrame, QScrollArea, QDialog, QSizePolicy,
 )
 
-from core import settings as cfg, launcher, session, uxplay_args
+from core import settings as cfg, launcher, session, uxplay_args, steam_shortcut
 from core import i18n
 from core import container as cman
 from core import avahi
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.7.1"
 APP_TITLE = "AirPlay Deck"
 
 # 界面主题配色（深色 / 浅色两套）。_apply_qss 按当前主题取一套填进样式表模板，
@@ -79,6 +79,7 @@ RUNTIME_KEYS = {
     "device_name", "append_hostname", "fps", "video_sink", "resolution",
     "display_mode", "decoder", "keep_window", "legacy_ports",
     "audio_sync",
+    "pin_enabled", "pin_code",
     "extra", "uxplay_path", "use_distrobox", "distrobox_container",
     "distrobox_method",
 }
@@ -519,6 +520,13 @@ class MainWindow(QMainWindow):
                 sep.setFixedHeight(1)
                 mv.addWidget(sep)
         v.addWidget(menu)
+        v.addSpacing(12)
+        self.btn_add_steam = QPushButton(self.T("btn_add_steam"))
+        self.btn_add_steam.setObjectName("primary")
+        self.btn_add_steam.setMinimumHeight(44)
+        self.btn_add_steam.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_steam.clicked.connect(self._add_to_steam)
+        v.addWidget(self.btn_add_steam)
         v.addStretch(1)
         return page
 
@@ -669,6 +677,27 @@ class MainWindow(QMainWindow):
         self.f_autostart = QCheckBox(self.T("autostart"))
         self.f_autostart.setChecked(bool(self.settings.get("autostart")))
         form.addRow(self._form_label(""), self.f_autostart)
+
+        # 可选 PIN：默认关闭；勾选后才启用 4 位数字输入（UxPlay -pin）
+        self.f_pin_enable = QCheckBox(self.T("pin_enable"))
+        self.f_pin_enable.setChecked(bool(self.settings.get("pin_enabled")))
+        self.f_pin = QLineEdit(str(self.settings.get("pin_code") or ""))
+        self.f_pin.setPlaceholderText(self.T("pin_ph"))
+        self.f_pin.setMaxLength(4)
+        self.f_pin.setInputMask("0000")
+        self.f_pin.setEnabled(self.f_pin_enable.isChecked())
+        self.f_pin_hint = QLabel(self.T("pin_hint"))
+        self.f_pin_hint.setObjectName("hint")
+        self.f_pin_hint.setWordWrap(True)
+        _pin_box = QWidget()
+        _pin_v = QVBoxLayout(_pin_box)
+        _pin_v.setContentsMargins(0, 0, 0, 0)
+        _pin_v.setSpacing(4)
+        _pin_v.addWidget(self.f_pin_enable)
+        _pin_v.addWidget(self.f_pin)
+        _pin_v.addWidget(self.f_pin_hint)
+        form.addRow(self._form_label(self.T("pin_label")), _pin_box)
+        self.f_pin_enable.toggled.connect(self.f_pin.setEnabled)
 
         self._lang_combo = QComboBox()
         self._lang_combo.addItem(self.T("lang_auto"), "auto")
@@ -1140,6 +1169,10 @@ class MainWindow(QMainWindow):
         self.f_name.setText(s.get("device_name", "SteamDeck"))
         self.f_append.setChecked(bool(s.get("append_hostname")))
         self.f_autostart.setChecked(bool(s.get("autostart")))
+        if getattr(self, "f_pin_enable", None) is not None:
+            self.f_pin_enable.setChecked(bool(s.get("pin_enabled")))
+            self.f_pin.setText(str(s.get("pin_code") or ""))
+            self.f_pin.setEnabled(self.f_pin_enable.isChecked())
         i = self.f_fps.findData(int(s.get("fps", 30) or 30))
         self.f_fps.setCurrentIndex(max(0, i))
         self.f_sink.setCurrentText(s.get("video_sink", "ximagesink"))
@@ -1311,6 +1344,9 @@ class MainWindow(QMainWindow):
         s["device_name"] = self.f_name.text().strip() or "SteamDeck"
         s["append_hostname"] = self.f_append.isChecked()
         s["autostart"] = self.f_autostart.isChecked()
+        if getattr(self, "f_pin_enable", None) is not None:
+            s["pin_enabled"] = self.f_pin_enable.isChecked()
+            s["pin_code"] = "".join(ch for ch in self.f_pin.text() if ch.isdigit())[:4]
         s["fps"] = int(self.f_fps.currentData() or 30)
         s["video_sink"] = self.f_sink.currentText()
         s["resolution"] = self.f_res.currentData() or "auto"
@@ -1331,7 +1367,16 @@ class MainWindow(QMainWindow):
 
     def _save(self, silent: bool = False):
         old = dict(self.settings)
-        self.settings = self._collect()
+        collected = self._collect()
+        if collected.get("pin_enabled"):
+            pin = "".join(ch for ch in str(collected.get("pin_code") or "") if ch.isdigit())
+            if len(pin) != 4:
+                if not silent:
+                    self._flash_saved(self.T("pin_invalid"))
+                self._log("error", self.T("pin_invalid"))
+                return
+            collected["pin_code"] = pin
+        self.settings = collected
         try:
             cfg.save_settings(self.settings)
         except Exception as e:
@@ -1361,6 +1406,43 @@ class MainWindow(QMainWindow):
         else:
             self._log("info", self.T("log_saved"))
             self._flash_saved()
+
+
+    def _add_to_steam(self):
+        """主页一键：把当前 AppImage 写入 Steam 非 Steam 游戏库。"""
+        try:
+            ok, code = steam_shortcut.add_to_steam(APP_TITLE)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                self.T("btn_add_steam"),
+                self.T("steam_add_fail", reason=str(e)),
+            )
+            self._log("error", f"add_to_steam: {e}")
+            return
+        if ok and code in ("added", "steamos_ok"):
+            QMessageBox.information(self, self.T("btn_add_steam"), self.T("steam_add_ok"))
+            self._log("info", f"add_to_steam: {code}")
+            return
+        if ok and code == "already":
+            QMessageBox.information(self, self.T("btn_add_steam"), self.T("steam_add_already"))
+            self._log("info", "add_to_steam: already")
+            return
+        reason_map = {
+            "steam_not_found": self.T("steam_reason_not_found"),
+            "no_userdata": self.T("steam_reason_not_found"),
+            "steamos_failed": self.T("steam_reason_not_found"),
+        }
+        if code.startswith("no_target"):
+            reason = self.T("steam_reason_no_target")
+        else:
+            reason = reason_map.get(code, code)
+        QMessageBox.warning(
+            self,
+            self.T("btn_add_steam"),
+            self.T("steam_add_fail", reason=reason),
+        )
+        self._log("error", f"add_to_steam failed: {code}")
 
     def _check_env(self):
         """一键检查运行环境：uxplay 可用性 + 容器就绪状态，结果合并到状态框。"""
