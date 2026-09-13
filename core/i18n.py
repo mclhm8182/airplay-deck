@@ -390,28 +390,28 @@ S: Dict[str, Dict[str, str]] = {
             "1. 「診断」でコンテナを確認。\n"
             "2. ホームに戻り、スイッチをオン。\n"
             "3. iPhone / iPad のコントロールセンター → 画面ミラーリング → 本機を選択。\n"
-            "ゲームモード（SteamOS での全画面占有）はまだ未対応です。今後のバージョンで対応予定です。現時点ではデスクトップモードをご利用ください。"
+            "デスクトップモードと SteamOS ゲームモードの両方に対応しています。\nデスクトップ：AppImage を直接起動。ウィンドウモードは縦動画を自動最大化。\nゲームモード：非 Steam ゲームとして登録して起動。投写は全画面。長尺動画では画面消灯防止をオンに。"
         ),
         "ko": (
             "Steam Deck / Linux 데스크톱을 AirPlay 수신기로 만듭니다(UxPlay 엔진 기반).\n\n"
             "1. '환경 확인 및 로그'에서 컨테이너 사용 가능 확인.\n"
             "2. 홈으로 돌아가 스위치를 켜고 수신 시작.\n"
             "3. iPhone / iPad 제어 센터 → 화면 미러링 → 이 기기 선택.\n"
-            "게임 모드(SteamOS 전체 화면 점유)는 아직 지원되지 않으며, 향후 버전에서 추가할 예정입니다. 현재는 데스크톱 모드를 이용해 주세요."
+            "데스크톱 모드와 SteamOS 게임 모드를 모두 지원합니다.\n데스크톱: AppImage를 직접 실행. 창 모드는 세로 영상을 자동 최대화.\n게임 모드: Non-Steam 게임으로 등록 후 실행. 미러링은 전체 화면. 긴 영상은 화면 켜짐 유지를 켜 두세요."
         ),
         "fr": (
             "Transformez votre Steam Deck / Linux en récepteur AirPlay, via UxPlay.\n\n"
             "1. Vérifiez le conteneur dans Diagnostic.\n"
             "2. De retour à l'accueil, activez pour démarrer.\n"
             "3. iPhone / iPad → Centre de contrôle → Mise en miroir → choisissez cet appareil.\n"
-            "Le mode jeu (prise en charge plein écran sur SteamOS) n'est pas encore pris en charge, mais est prévu pour une version future ; utilisez le mode bureau pour l'instant."
+            "Modes Bureau et Jeu SteamOS pris en charge.\nBureau : lancez l'AppImage ; le mode fenêtre maximise automatiquement la vidéo portrait.\nMode jeu : ajoutez l'AppImage comme jeu non-Steam ; plein écran. Gardez « garder l'écran allumé » pour les longs films."
         ),
         "de": (
             "Verwandelt Steam Deck / Linux in einen AirPlay-Empfänger (UxPlay).\n\n"
             "1. Container in Diagnose prüfen.\n"
             "2. Zurück zur Startseite, Schalter aktivieren.\n"
             "3. iPhone / iPad → Kontrollzentrum → Bildschirmspiegelung → dieses Gerät.\n"
-            "Der Spielmodus (Vollbild-Übernahme auf SteamOS) wird noch nicht unterstützt, ist aber für eine künftige Version geplant; nutzen Sie vorerst den Desktop-Modus."
+            "Desktop- und SteamOS-Spielmodus werden beide unterstützt.\nDesktop: AppImage starten; Fenstermodus maximiert Hochformat automatisch.\nSpielmodus: als Non-Steam-Spiel starten; Vollbild. Für lange Videos „Bildschirm wach halten“ aktiv lassen."
         ),
         "es": (
             "Convierte tu Steam Deck / Linux en un receptor AirPlay con UxPlay.\n\n"
