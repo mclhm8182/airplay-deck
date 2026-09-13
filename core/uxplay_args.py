@@ -82,9 +82,13 @@ def build_args(s: Dict[str, Any], is_gamemode: bool) -> List[str]:
     #   window     = 普通可拖动窗口，不传 -fs（靠上方 -s 1280x800 铺满屏幕、全画面不裁切）
     #   fullscreen = 无边框全屏，传 -fs
     #   auto       = 游戏模式无边框全屏(-fs)；桌面模式不传（正常窗口铺满 1280x800 屏幕）
+    # Game Mode：始终传 -fs。gamescope 下 window 模式常把画面缩成一小块，不可接受。
+    # 桌面模式仍按 display_mode 原有行为。
     # 注：旧的 apt 版 1.46 根本没有 -fs，传了直接 unknown option 退出——这正是升级引擎的原因之一。
     display_mode = s.get("display_mode") or "window"
-    if display_mode == "fullscreen" or (display_mode == "auto" and is_gamemode):
+    if is_gamemode:
+        args += ["-fs"]
+    elif display_mode == "fullscreen":
         args += ["-fs"]
 
     if s.get("legacy_ports"):

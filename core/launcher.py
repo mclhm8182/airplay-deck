@@ -100,6 +100,8 @@ class Launcher:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        # 每次新会话清掉上次残留的 fatal，否则一次渲染失败会永久阻断后续启动。
+        self._fatal = False
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -167,6 +169,9 @@ class Launcher:
         time.sleep(0.5)  # 给 mDNS 注册 / 端口释放一点时间
 
     def _run(self) -> None:
+        # 每次 _run（含 stop 后再 start）都清 fatal，避免上次会话毒化本次。
+        self._fatal = False
+
         # 1) avahi 就绪检查（纯只读，绝不触发 pkexec/sudo，避免每次启动弹密码框）
         if avahi.ensure_avahi():
             self._log("info", "avahi 已就绪，设备应出现在「隔空播放 / 屏幕镜像」列表")
@@ -353,6 +358,12 @@ class Launcher:
         if self._fatal:
             return
         self._fatal = True
+        # 初始化期 X 鉴权失败时，作废 X11 探针缓存，下次 start 重新探测。
+        try:
+            from . import gamemode_x11
+            gamemode_x11.invalidate_probe_cache("uxplay X/renderer init failure")
+        except Exception:
+            pass
         self._log("error", "uxplay 的视频渲染器初始化失败，无法输出画面。")
         self._log("error",
                   "两类常见原因：\n"
@@ -395,17 +406,22 @@ class Launcher:
         DISCONNECT_HINTS = (
             "connection closed", "client disconnected", "closed connection",
         )
-        # 致命错误：视频渲染器起不来（绝大多数是容器内 X 鉴权失败，或 ximagesink 后端损坏）。
+        # 仅把清晰的**初始化**失败视为永久 fatal（阻断重启）。
+        # 会话中途的 GStreamer assertion / GST_IS_ELEMENT 等只告警，不粘住 _fatal，
+        # 否则一次中途 glitch 会让后续 start() 永远起不来。
         # 这种情况下 uxplay **不会退出**，会继续监听并接受 iOS 连接，
         # 于是出现「搜得到、连得上、有声音、没画面 / 提示无法连接」。
-        FATAL_HINTS = (
+        INIT_FATAL_HINTS = (
             "failed to initialize gstreamer video renderer",
             "could not initialise x output",
             "authorization required",
-            "no element \"ximagesink\"",  # 1.73.7：gstreamer1.0-x 未装时的报错（渲染器起不来）
+            'no element "ximagesink"',  # gstreamer1.0-x 未装时的报错（渲染器起不来）
+        )
+        MID_SESSION_GST_HINTS = (
+            "gst_is_element",
+            "assertion",
             "renderer->sink",        # UxPlay video_renderer_init 断言：ximagesink 后端不可用
-            "video_renderer_init",   # 同上，断言行含此字样
-            "assertion",             # 兜底：任何 g_assert 触发的崩溃都视为渲染器起不来
+            "video_renderer_init",
         )
         # 卡顿/发涩的信号：uxplay 报「重传失败」或「客户端反馈超时」。
         # 这两句同时出现，基本可以断定是 iPad/iPhone 与 Deck 之间的 Wi-Fi 丢包，
@@ -416,6 +432,8 @@ class Launcher:
         )
         last_line = None
         dup = 0
+        session_useful = False  # 已真正连上/出流后，中途 GST 断言不再设 sticky fatal
+        mid_gst_warned = False
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
@@ -424,9 +442,21 @@ class Launcher:
                 # 仍在传输的迹象：只要这些还在刷，就说明投屏没断
                 if any(k in low for k in ("raop_rtp", "resend", "rtp", "video", "audio", "packet")):
                     self._last_data_ts = time.time()
-                if any(h in low for h in FATAL_HINTS):
+                if any(h in low for h in CONNECTED_HINTS):
+                    session_useful = True
+                if any(h in low for h in INIT_FATAL_HINTS):
+                    # 清晰 init 失败：即便中途也几乎总是致命（X 鉴权 / sink 缺失）
                     self._mark_fatal()
-                elif any(h in low for h in DISCONNECT_HINTS):
+                elif (not session_useful) and any(h in low for h in MID_SESSION_GST_HINTS):
+                    # 启动早期出现的 renderer 断言：仍视为 init 失败
+                    self._mark_fatal()
+                elif session_useful and any(h in low for h in MID_SESSION_GST_HINTS):
+                    if not mid_gst_warned:
+                        mid_gst_warned = True
+                        self._log("warn",
+                                  "会话中出现 GStreamer 断言/critical（不设为永久 fatal，可重试启动）："
+                                  + line[:200])
+                if any(h in low for h in DISCONNECT_HINTS):
                     self._schedule_waiting()
                 elif any(h in low for h in CONNECTED_HINTS):
                     self._cancel_waiting()
