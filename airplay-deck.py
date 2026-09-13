@@ -1,5 +1,3 @@
-successfully downloaded text file (SHA: 2cb1a5855ec6f540874772ec8ca040084650e9ae)
-
 #!/usr/bin/env python3
 # ============================================================================
 #  AirPlay Deck —— 独立桌面 App（替代 Decky 插件路线）
