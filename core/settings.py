@@ -53,6 +53,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "language": "auto",          # auto（跟随系统）| zh_CN | zh_TW | en | ja
     # 界面主题：auto（跟随系统深浅色）| dark | light
     "theme": "auto",
+    # AirPlay PIN（UxPlay -pin NNNN）：默认关闭；开启后需 4 位数字
+    "pin_enabled": False,
+    "pin_code": "",
 }
 
 VIDEO_SINKS = ["ximagesink", "xvimagesink", "autovideosink", "glimagesink", "vaapisink"]
