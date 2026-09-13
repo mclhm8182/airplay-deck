@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
-from . import audio, avahi, session, uxplay_args, x11
+from . import audio, avahi, keepalive, session, uxplay_args, window_maximize, x11
 
 StatusCb = Callable[[str], None]          # "idle" | "waiting" | "connected" | "error"
 LogCb = Callable[[str, str], None]        # (level, message)
@@ -45,6 +45,10 @@ class Launcher:
         self._fatal = False        # 视频渲染器起不来等致命错误
         self._ghost_hint_shown = False
         self._inhibit = None  # systemd-inhibit 子进程；投屏时阻止系统空闲/熄屏
+        self._keepalive = None  # DisplayKeepalive：宿主 xset 周期性防熄屏
+        self._active_display = None  # 探针/环境得到的 DISPLAY（宿主保活用）
+        self._maximizer = None  # 桌面窗口模式：宿主 WM 自动最大化投屏窗
+        self._want_window_maximize = False  # 本会话是否启用自动最大化（非 -fs 兜底）
         self._install_signal_handlers()
 
     # ---- 信号处理：让 Steam「退出游戏」能干净关掉 uxplay -------------------- #
@@ -57,31 +61,88 @@ class Launcher:
 
     # ---- 保活防熄屏：投屏期间阻止系统空闲/熄屏 ---------------------------- #
     def _start_inhibit(self) -> None:
-        """连接设备后调用：通过 systemd-inhibit 接管 idle+sleep，保持屏幕常亮。
+        """uxplay 启动后尽早调用：systemd-inhibit + 宿主 xset 显示保活。
 
-        仅在 anti_sleep 开启且尚未持锁时生效。SteamOS 是 systemd 系统，
-        锁住 logind 的 idle 动作即可阻止 KDE/PowerDevil 熄屏与锁屏。
-        若主机没有 systemd-inhibit（如 macOS 调试、非 systemd 环境），仅告警不报错，
-        不影响投屏主流程。
+        旧逻辑只在 CONNECTED 时 inhibit，长片投屏在「已连接」前几分钟内仍可能
+        被 gamescope 熄屏。现改为 waiting 阶段即启用；幂等可重复调用。
+
+        ``systemd-inhibit --what=idle:sleep`` 只能挡 logind 空闲/休眠；Game Mode
+        下显示黑屏常与 gamescope 自身策略有关，故另开 DisplayKeepalive 线程在
+        宿主 DISPLAY 上周期性 ``xset s reset`` / ``dpms force on``。
         """
-        if self._inhibit is not None:
-            return
         if not self.settings.get("anti_sleep", True):
             return
-        try:
-            self._inhibit = subprocess.Popen(
-                ["systemd-inhibit", "--what=idle:sleep",
-                 "--why=AirPlay 投屏中，保持屏幕常亮", "sleep", "infinity"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                start_new_session=True,
+
+        # --- systemd-inhibit：优先 --mode=block；失败则回退无 mode --- #
+        if self._inhibit is None:
+            why = "AirPlay 投屏中，保持屏幕常亮"
+            # idle:sleep 为下限；idle 覆盖 logind 空闲熄屏动作
+            base = ["systemd-inhibit", "--what=idle:sleep",
+                    "--why=" + why, "sleep", "infinity"]
+            started = False
+            last_err = None
+            for cmd in (
+                ["systemd-inhibit", "--what=idle:sleep", "--mode=block",
+                 "--why=" + why, "sleep", "infinity"],
+                base,
+            ):
+                try:
+                    p = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    # 不支持的参数会立刻退出；稍等确认进程仍在
+                    time.sleep(0.15)
+                    if p.poll() is not None:
+                        last_err = RuntimeError(
+                            f"systemd-inhibit 立即退出 rc={p.returncode}"
+                            + ("（可能不支持 --mode=block）"
+                               if "--mode=block" in cmd else "")
+                        )
+                        continue
+                    self._inhibit = p
+                    mode_note = "（mode=block）" if "--mode=block" in cmd else ""
+                    self._log(
+                        "info",
+                        "已启用保活防熄屏（systemd-inhibit 接管空闲/休眠"
+                        f"{mode_note}；what=idle:sleep）",
+                    )
+                    started = True
+                    break
+                except Exception as e:
+                    self._inhibit = None
+                    last_err = e
+            if not started:
+                self._log(
+                    "warn",
+                    f"保活防熄屏不可用（systemd-inhibit 缺失或被拒绝）：{last_err}",
+                )
+
+        # --- 宿主 xset 显示保活线程（对抗 gamescope 黑屏）--- #
+        if self._keepalive is None:
+            is_gm = session.is_gamemode()
+            preferred = self._active_display or os.environ.get("DISPLAY")
+            displays = keepalive.resolve_displays(preferred=preferred)
+            self._keepalive = keepalive.DisplayKeepalive(
+                displays=displays,
+                interval=keepalive.DEFAULT_INTERVAL_SEC,
+                log=self._log,
+                gamemode=is_gm,
             )
-            self._log("info", "已启用保活防熄屏（systemd-inhibit 接管空闲/休眠）")
-        except Exception as e:
-            self._inhibit = None
-            self._log("warn", f"保活防熄屏不可用（systemd-inhibit 缺失或被拒绝）：{e}")
+            self._keepalive.start()
 
     def _stop_inhibit(self) -> None:
-        """释放保活锁。幂等，可重复调用。"""
+        """释放保活锁 + 停止显示保活线程（含一次性亮屏）。幂等。"""
+        # 先停 keepalive（内部会 one-shot wake），再杀 inhibit
+        ka = self._keepalive
+        self._keepalive = None
+        if ka is not None:
+            try:
+                ka.stop(wake=True)
+            except Exception:
+                pass
+
         if self._inhibit is None:
             return
         p = self._inhibit
@@ -96,10 +157,38 @@ class Launcher:
             pass
         self._log("info", "已解除保活防熄屏限制")
 
+    # ---- 桌面窗口自动最大化（宿主 WM；竖屏小窗问题）---------------------- #
+    def _start_maximizer(self) -> None:
+        """桌面 window/auto：启动后轮询最大化 uxplay 视频窗。幂等。"""
+        if not self._want_window_maximize:
+            return
+        if self._maximizer is not None:
+            return
+        device = (self.settings.get("device_name") or "").strip()
+        extra = [device] if device else []
+        preferred = self._active_display or os.environ.get("DISPLAY") or ":0"
+        self._maximizer = window_maximize.WindowMaximizer(
+            display=preferred,
+            extra_needles=extra,
+            log=self._log,
+        )
+        self._maximizer.start()
+
+    def _stop_maximizer(self) -> None:
+        m = self._maximizer
+        self._maximizer = None
+        if m is not None:
+            try:
+                m.stop()
+            except Exception:
+                pass
+
     # ---- 对外接口 ---------------------------------------------------------- #
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        # 每次新会话清掉上次残留的 fatal，否则一次渲染失败会永久阻断后续启动。
+        self._fatal = False
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -121,6 +210,7 @@ class Launcher:
             container = (self.settings.get("distrobox_container") or "uxplay-env").strip()
             self._kill_container_uxplay(container)
             self._log("info", f"已停止接收，并清理容器 {container} 内的 uxplay")
+        self._stop_maximizer()
         self._stop_inhibit()  # 退出投屏：解除保活锁
 
     def is_running(self) -> bool:
@@ -167,6 +257,9 @@ class Launcher:
         time.sleep(0.5)  # 给 mDNS 注册 / 端口释放一点时间
 
     def _run(self) -> None:
+        # 每次 _run（含 stop 后再 start）都清 fatal，避免上次会话毒化本次。
+        self._fatal = False
+
         # 1) avahi 就绪检查（纯只读，绝不触发 pkexec/sudo，避免每次启动弹密码框）
         if avahi.ensure_avahi():
             self._log("info", "avahi 已就绪，设备应出现在「隔空播放 / 屏幕镜像」列表")
@@ -182,6 +275,22 @@ class Launcher:
             self._log("error", f"参数组装失败: {e}")
             self._status("error")
             return
+
+        # 桌面 window/auto：优先宿主 WM 最大化投屏窗（竖屏流不再缩成小窗）。
+        # 若无 wmctrl/xdotool：最后手段追加 -fs，使画面仍铺满屏幕（见 window_maximize 模块注释）。
+        # Game Mode / 显式 fullscreen 已由 build_args 传 -fs，此处不干预。
+        self._want_window_maximize = False
+        if window_maximize.should_auto_maximize(is_gm, self.settings.get("display_mode")):
+            if window_maximize.tools_available():
+                self._want_window_maximize = True
+            else:
+                if "-fs" not in args:
+                    args.append("-fs")
+                self._log(
+                    "warn",
+                    "未找到 wmctrl/xdotool，桌面窗口模式改用 -fs 全屏兜底；"
+                    "建议安装 wmctrl（或 xdotool），或在设置中选择「全屏」显示模式",
+                )
 
         binpath = self._uxplay_bin()
         if self.settings.get("use_distrobox"):
@@ -215,6 +324,7 @@ class Launcher:
                 # ★ X11：不能只试继承来的 DISPLAY（游戏模式下可能是 :1，容器里根本连不上），
                 #   要把 DISPLAY × XAUTHORITY 组合逐个实测，选真能连上的那个。
                 display, ctr_xauth = x11.probe_container_display(container, display, self._log)
+                self._active_display = display
                 cmd = x11.build_podman_cmd(
                     container, display, ctr_xauth, binpath, args,
                     os.environ.get("HOME", "/root"),
@@ -263,6 +373,8 @@ class Launcher:
         self._stutter_hint_shown = False
 
         # 4) 主循环：仅在 uxplay 真正崩溃时重启
+        if not self._active_display:
+            self._active_display = (os.environ.get("DISPLAY") or "").strip() or None
         self._status("waiting")
         early_fails = 0
         while not self._stop.is_set():
@@ -288,9 +400,16 @@ class Launcher:
                 self._status("error")
                 return
 
+            # uxplay 已拉起即启用保活（不等到 CONNECTED）：长片投屏在
+            # gamescope 下几分钟后可能黑屏，仅靠连接后 inhibit 来不及。
+            self._start_inhibit()
+            # 桌面窗口模式：窗口可能稍晚才映射，后台重试最大化。
+            self._stop_maximizer()
+            self._start_maximizer()
             threading.Thread(target=self._pump, args=(self.proc,), daemon=True).start()
             ec = self.proc.wait()
             self.proc = None
+            self._stop_maximizer()
             run = time.time() - t0
             self._log("exit", f"uxplay 退出码={ec} 存活={run:.0f}s")
 
@@ -328,6 +447,7 @@ class Launcher:
             self._log("warn", "uxplay 异常退出，1 秒后重启…")
             time.sleep(1.0)
 
+        self._stop_maximizer()
         self._stop_inhibit()  # 兜底：循环退出时确保释放保活锁
         self._status("idle")
 
@@ -353,6 +473,12 @@ class Launcher:
         if self._fatal:
             return
         self._fatal = True
+        # 初始化期 X 鉴权失败时，作废 X11 探针缓存，下次 start 重新探测。
+        try:
+            from . import gamemode_x11
+            gamemode_x11.invalidate_probe_cache("uxplay X/renderer init failure")
+        except Exception:
+            pass
         self._log("error", "uxplay 的视频渲染器初始化失败，无法输出画面。")
         self._log("error",
                   "两类常见原因：\n"
@@ -395,17 +521,22 @@ class Launcher:
         DISCONNECT_HINTS = (
             "connection closed", "client disconnected", "closed connection",
         )
-        # 致命错误：视频渲染器起不来（绝大多数是容器内 X 鉴权失败，或 ximagesink 后端损坏）。
+        # 仅把清晰的**初始化**失败视为永久 fatal（阻断重启）。
+        # 会话中途的 GStreamer assertion / GST_IS_ELEMENT 等只告警，不粘住 _fatal，
+        # 否则一次中途 glitch 会让后续 start() 永远起不来。
         # 这种情况下 uxplay **不会退出**，会继续监听并接受 iOS 连接，
         # 于是出现「搜得到、连得上、有声音、没画面 / 提示无法连接」。
-        FATAL_HINTS = (
+        INIT_FATAL_HINTS = (
             "failed to initialize gstreamer video renderer",
             "could not initialise x output",
             "authorization required",
-            "no element \"ximagesink\"",  # 1.73.7：gstreamer1.0-x 未装时的报错（渲染器起不来）
+            'no element "ximagesink"',  # gstreamer1.0-x 未装时的报错（渲染器起不来）
+        )
+        MID_SESSION_GST_HINTS = (
+            "gst_is_element",
+            "assertion",
             "renderer->sink",        # UxPlay video_renderer_init 断言：ximagesink 后端不可用
-            "video_renderer_init",   # 同上，断言行含此字样
-            "assertion",             # 兜底：任何 g_assert 触发的崩溃都视为渲染器起不来
+            "video_renderer_init",
         )
         # 卡顿/发涩的信号：uxplay 报「重传失败」或「客户端反馈超时」。
         # 这两句同时出现，基本可以断定是 iPad/iPhone 与 Deck 之间的 Wi-Fi 丢包，
@@ -416,6 +547,8 @@ class Launcher:
         )
         last_line = None
         dup = 0
+        session_useful = False  # 已真正连上/出流后，中途 GST 断言不再设 sticky fatal
+        mid_gst_warned = False
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
@@ -424,14 +557,33 @@ class Launcher:
                 # 仍在传输的迹象：只要这些还在刷，就说明投屏没断
                 if any(k in low for k in ("raop_rtp", "resend", "rtp", "video", "audio", "packet")):
                     self._last_data_ts = time.time()
-                if any(h in low for h in FATAL_HINTS):
+                if any(h in low for h in CONNECTED_HINTS):
+                    session_useful = True
+                if any(h in low for h in INIT_FATAL_HINTS):
+                    # 清晰 init 失败：即便中途也几乎总是致命（X 鉴权 / sink 缺失）
                     self._mark_fatal()
-                elif any(h in low for h in DISCONNECT_HINTS):
+                elif (not session_useful) and any(h in low for h in MID_SESSION_GST_HINTS):
+                    # 启动早期出现的 renderer 断言：仍视为 init 失败
+                    self._mark_fatal()
+                elif session_useful and any(h in low for h in MID_SESSION_GST_HINTS):
+                    if not mid_gst_warned:
+                        mid_gst_warned = True
+                        self._log("warn",
+                                  "会话中出现 GStreamer 断言/critical（不设为永久 fatal，可重试启动）："
+                                  + line[:200])
+                if any(h in low for h in DISCONNECT_HINTS):
                     self._schedule_waiting()
                 elif any(h in low for h in CONNECTED_HINTS):
                     self._cancel_waiting()
                     self._status("connected")
-                    self._start_inhibit()  # 投屏中：保持屏幕常亮
+                    self._start_inhibit()  # 幂等：已在 waiting 启用，此处兜底
+                    # 首次最大化可能早于视频窗创建；CONNECTED 再试一次
+                    m = self._maximizer
+                    if m is not None:
+                        try:
+                            m.on_connected()
+                        except Exception:
+                            pass
 
                 # 只提示一次，别在 200 行刷屏里反复出现
                 # （用 getattr 兜底：这个循环外面包着 except Exception，真抛异常会静默掐掉日志）

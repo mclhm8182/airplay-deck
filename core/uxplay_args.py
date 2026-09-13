@@ -9,7 +9,7 @@
   * 引擎为**自编译的 UxPlay 1.73.7**（见 core/container.py）：它支持 -fs 全屏
     （man page：「-fs Full-screen (only with X11, Wayland, VAAPI, D3D11, kms)」，
     构建时需带 X11 支持）。因此 display_mode 现在会真实产生 -fs：
-      window     → 不传 -fs（普通窗口，靠 -s 1280x800 铺满）
+      window     → 桌面不传 -fs；游戏模式仍强制 -fs（gamescope 下窗口会缩成一小块）
       fullscreen → -fs
       auto       → 游戏模式 -fs；桌面模式不传
     注意：旧 apt 版 1.46 没有任何全屏选项（-fs/-vsync/-reset 都会 unknown option 退出），
@@ -82,9 +82,13 @@ def build_args(s: Dict[str, Any], is_gamemode: bool) -> List[str]:
     #   window     = 普通可拖动窗口，不传 -fs（靠上方 -s 1280x800 铺满屏幕、全画面不裁切）
     #   fullscreen = 无边框全屏，传 -fs
     #   auto       = 游戏模式无边框全屏(-fs)；桌面模式不传（正常窗口铺满 1280x800 屏幕）
+    # Game Mode：始终传 -fs。gamescope 下 window 模式常把画面缩成一小块，不可接受。
+    # 桌面模式仍按 display_mode 原有行为。
     # 注：旧的 apt 版 1.46 根本没有 -fs，传了直接 unknown option 退出——这正是升级引擎的原因之一。
     display_mode = s.get("display_mode") or "window"
-    if display_mode == "fullscreen" or (display_mode == "auto" and is_gamemode):
+    if is_gamemode:
+        args += ["-fs"]
+    elif display_mode == "fullscreen":
         args += ["-fs"]
 
     if s.get("legacy_ports"):
