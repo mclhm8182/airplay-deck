@@ -19,6 +19,7 @@ LogCb = Callable[[str, str], None]
 
 # 20–30s 区间取中；过密浪费、过疏可能赶不上熄屏策略。
 DEFAULT_INTERVAL_SEC = 25.0
+GAMEMODE_INTERVAL_SEC = 10.0
 
 
 def xset_available() -> bool:
@@ -113,7 +114,14 @@ def poke_displays(displays: Iterable[str], log: Optional[LogCb] = None) -> bool:
         return False
     ok_any = False
     for disp in displays:
-        for args in (("s", "reset"), ("dpms", "force", "on")):
+        # 周期性重新关掉屏保/DPMS：SteamOS 电源策略可能中途改回去
+        for args in (
+            ("s", "off"),
+            ("-dpms",),
+            ("s", "noblank"),
+            ("s", "reset"),
+            ("dpms", "force", "on"),
+        ):
             if _run_xset(disp, args) == 0:
                 ok_any = True
     return ok_any
