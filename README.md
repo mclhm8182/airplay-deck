@@ -11,7 +11,7 @@ AirPlay Deck wraps the mature [UxPlay](https://github.com/FDH2/UxPlay) engine (s
 ## Features
 
 - One-click mirroring: open the app and connect from the iPhone / iPad Control Center "Screen Mirroring"
-- Desktop mode is stable and recommended; Game Mode has experimental X11 auth fixes (match container uid to the Deck user, prefer cookie fallback over unset, probe cache) but is **not fully supported** yet. Under gamescope, fullscreen (`-fs`) is forced so the picture is not shrunk to a tiny patch.
+- Desktop mode is stable and recommended; Game Mode has experimental fixes (X11 auth, forced `-fs`, long-session keepalive via stronger systemd-inhibit + host `xset` display poke) but is **not fully supported** yet.
 - The runtime environment (a distrobox container) is compiled and installed automatically on first launch — no manual package setup
 - Audio, resolution, frame rate, and display mode are all adjustable
 - The GUI is available in 8 languages (Simplified Chinese, Traditional Chinese, English, Japanese, Korean, French, German, Spanish) and follows the system language automatically
@@ -34,7 +34,7 @@ The AppImage lives in your home directory, so SteamOS system updates won't remov
 
 Audio sync defaults to "live" mode: sound keeps up instantly when scrolling short videos or gaming, without the few-second delay that appears when content switches. If you watch movies and want strict audio-video alignment, turn on "Audio sync" under "Video & Rendering".
 
-> Game Mode (full-screen takeover on SteamOS) remains experimental: this branch improves X11 authorization inside the container (run as the host uid, clearer probe errors, cookie fallback, ~5 min probe cache). Fullscreen (`-fs`) is always forced under gamescope because window mode often shrinks the video. Desktop Mode is still the reliable path; Game Mode may still fail depending on gamescope / Steam LD_PRELOAD.
+> Game Mode (full-screen takeover on SteamOS) remains experimental: this branch improves X11 auth and targets the long-movie “black video, audio continues” blanking under gamescope with stronger systemd-inhibit (`--what=idle:sleep --mode=block`) plus host `xset` keepalive (still experimental). Fullscreen (`-fs`) is always forced under gamescope. Desktop Mode remains the reliable path.
 
 ## Screenshots
 
@@ -51,7 +51,7 @@ Audio sync defaults to "live" mode: sound keeps up instantly when scrolling shor
 | Display mode | Window | Window: draggable small window; Fullscreen: borderless fill; Auto: app chooses per session |
 | Resolution | Auto | Auto requests a 1280×800 (Deck native) stream, filling the screen without cropping |
 | Audio sync | Off | Off: live-style instant audio; On: timestamp-based strict A/V sync (good for movies) |
-| Keep screen awake while mirroring | On | Prevents system sleep during a session |
+| Keep screen awake while mirroring | On | Prevents sleep while uxplay runs; Game Mode also uses host xset keepalive (experimental) |
 | Run via container | On | Reuses the uxplay-env container, installed automatically on first launch; off requires uxplay installed natively |
 
 ## FAQ
@@ -80,6 +80,9 @@ podman exec -u 0 uxplay-env bash -lc "apt-get update && apt-get install -y gstre
 
 **Game Mode: connects / has sound but no picture, or log shows Authorization required**
 SteamOS Game Mode runs Xwayland as the Deck user (uid 1000) while the container may default to root. Recent builds run X probes and uxplay as the host uid/gid and avoid falling back to `unset XAUTHORITY` when a cookie is available. If it still fails, export logs from "Check & Logs" (look for host libX11 probe + container uid) and use Desktop Mode.
+
+**Game Mode: after a few minutes of movie casting the screen goes black while audio continues**
+gamescope may blank the display independently of logind. From v0.6.11, with “Keep screen awake” enabled, a stronger systemd-inhibit starts as soon as uxplay launches, and a host-side `xset` thread periodically resets the screensaver / forces DPMS on (with a one-shot wake on stop). If `xset` is missing, only inhibit is used and blanking may still occur. This remains experimental; if it reproduces, export logs and use Desktop Mode.
 
 ## Building from source (optional)
 

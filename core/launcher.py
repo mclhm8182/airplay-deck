@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
-from . import audio, avahi, session, uxplay_args, x11
+from . import audio, avahi, keepalive, session, uxplay_args, x11
 
 StatusCb = Callable[[str], None]          # "idle" | "waiting" | "connected" | "error"
 LogCb = Callable[[str, str], None]        # (level, message)
@@ -45,6 +45,8 @@ class Launcher:
         self._fatal = False        # 视频渲染器起不来等致命错误
         self._ghost_hint_shown = False
         self._inhibit = None  # systemd-inhibit 子进程；投屏时阻止系统空闲/熄屏
+        self._keepalive = None  # DisplayKeepalive：宿主 xset 周期性防熄屏
+        self._active_display = None  # 探针/环境得到的 DISPLAY（宿主保活用）
         self._install_signal_handlers()
 
     # ---- 信号处理：让 Steam「退出游戏」能干净关掉 uxplay -------------------- #
@@ -57,31 +59,88 @@ class Launcher:
 
     # ---- 保活防熄屏：投屏期间阻止系统空闲/熄屏 ---------------------------- #
     def _start_inhibit(self) -> None:
-        """连接设备后调用：通过 systemd-inhibit 接管 idle+sleep，保持屏幕常亮。
+        """uxplay 启动后尽早调用：systemd-inhibit + 宿主 xset 显示保活。
 
-        仅在 anti_sleep 开启且尚未持锁时生效。SteamOS 是 systemd 系统，
-        锁住 logind 的 idle 动作即可阻止 KDE/PowerDevil 熄屏与锁屏。
-        若主机没有 systemd-inhibit（如 macOS 调试、非 systemd 环境），仅告警不报错，
-        不影响投屏主流程。
+        旧逻辑只在 CONNECTED 时 inhibit，长片投屏在「已连接」前几分钟内仍可能
+        被 gamescope 熄屏。现改为 waiting 阶段即启用；幂等可重复调用。
+
+        ``systemd-inhibit --what=idle:sleep`` 只能挡 logind 空闲/休眠；Game Mode
+        下显示黑屏常与 gamescope 自身策略有关，故另开 DisplayKeepalive 线程在
+        宿主 DISPLAY 上周期性 ``xset s reset`` / ``dpms force on``。
         """
-        if self._inhibit is not None:
-            return
         if not self.settings.get("anti_sleep", True):
             return
-        try:
-            self._inhibit = subprocess.Popen(
-                ["systemd-inhibit", "--what=idle:sleep",
-                 "--why=AirPlay 投屏中，保持屏幕常亮", "sleep", "infinity"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                start_new_session=True,
+
+        # --- systemd-inhibit：优先 --mode=block；失败则回退无 mode --- #
+        if self._inhibit is None:
+            why = "AirPlay 投屏中，保持屏幕常亮"
+            # idle:sleep 为下限；idle 覆盖 logind 空闲熄屏动作
+            base = ["systemd-inhibit", "--what=idle:sleep",
+                    "--why=" + why, "sleep", "infinity"]
+            started = False
+            last_err = None
+            for cmd in (
+                ["systemd-inhibit", "--what=idle:sleep", "--mode=block",
+                 "--why=" + why, "sleep", "infinity"],
+                base,
+            ):
+                try:
+                    p = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    # 不支持的参数会立刻退出；稍等确认进程仍在
+                    time.sleep(0.15)
+                    if p.poll() is not None:
+                        last_err = RuntimeError(
+                            f"systemd-inhibit 立即退出 rc={p.returncode}"
+                            + ("（可能不支持 --mode=block）"
+                               if "--mode=block" in cmd else "")
+                        )
+                        continue
+                    self._inhibit = p
+                    mode_note = "（mode=block）" if "--mode=block" in cmd else ""
+                    self._log(
+                        "info",
+                        "已启用保活防熄屏（systemd-inhibit 接管空闲/休眠"
+                        f"{mode_note}；what=idle:sleep）",
+                    )
+                    started = True
+                    break
+                except Exception as e:
+                    self._inhibit = None
+                    last_err = e
+            if not started:
+                self._log(
+                    "warn",
+                    f"保活防熄屏不可用（systemd-inhibit 缺失或被拒绝）：{last_err}",
+                )
+
+        # --- 宿主 xset 显示保活线程（对抗 gamescope 黑屏）--- #
+        if self._keepalive is None:
+            is_gm = session.is_gamemode()
+            preferred = self._active_display or os.environ.get("DISPLAY")
+            displays = keepalive.resolve_displays(preferred=preferred)
+            self._keepalive = keepalive.DisplayKeepalive(
+                displays=displays,
+                interval=keepalive.DEFAULT_INTERVAL_SEC,
+                log=self._log,
+                gamemode=is_gm,
             )
-            self._log("info", "已启用保活防熄屏（systemd-inhibit 接管空闲/休眠）")
-        except Exception as e:
-            self._inhibit = None
-            self._log("warn", f"保活防熄屏不可用（systemd-inhibit 缺失或被拒绝）：{e}")
+            self._keepalive.start()
 
     def _stop_inhibit(self) -> None:
-        """释放保活锁。幂等，可重复调用。"""
+        """释放保活锁 + 停止显示保活线程（含一次性亮屏）。幂等。"""
+        # 先停 keepalive（内部会 one-shot wake），再杀 inhibit
+        ka = self._keepalive
+        self._keepalive = None
+        if ka is not None:
+            try:
+                ka.stop(wake=True)
+            except Exception:
+                pass
+
         if self._inhibit is None:
             return
         p = self._inhibit
@@ -220,6 +279,7 @@ class Launcher:
                 # ★ X11：不能只试继承来的 DISPLAY（游戏模式下可能是 :1，容器里根本连不上），
                 #   要把 DISPLAY × XAUTHORITY 组合逐个实测，选真能连上的那个。
                 display, ctr_xauth = x11.probe_container_display(container, display, self._log)
+                self._active_display = display
                 cmd = x11.build_podman_cmd(
                     container, display, ctr_xauth, binpath, args,
                     os.environ.get("HOME", "/root"),
@@ -268,6 +328,8 @@ class Launcher:
         self._stutter_hint_shown = False
 
         # 4) 主循环：仅在 uxplay 真正崩溃时重启
+        if not self._active_display:
+            self._active_display = (os.environ.get("DISPLAY") or "").strip() or None
         self._status("waiting")
         early_fails = 0
         while not self._stop.is_set():
@@ -293,6 +355,9 @@ class Launcher:
                 self._status("error")
                 return
 
+            # uxplay 已拉起即启用保活（不等到 CONNECTED）：长片投屏在
+            # gamescope 下几分钟后可能黑屏，仅靠连接后 inhibit 来不及。
+            self._start_inhibit()
             threading.Thread(target=self._pump, args=(self.proc,), daemon=True).start()
             ec = self.proc.wait()
             self.proc = None
@@ -461,7 +526,7 @@ class Launcher:
                 elif any(h in low for h in CONNECTED_HINTS):
                     self._cancel_waiting()
                     self._status("connected")
-                    self._start_inhibit()  # 投屏中：保持屏幕常亮
+                    self._start_inhibit()  # 幂等：已在 waiting 启用，此处兜底
 
                 # 只提示一次，别在 200 行刷屏里反复出现
                 # （用 getattr 兜底：这个循环外面包着 except Exception，真抛异常会静默掐掉日志）

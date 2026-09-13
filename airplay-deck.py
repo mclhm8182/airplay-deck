@@ -1,3 +1,5 @@
+successfully downloaded text file (SHA: 2cb1a5855ec6f540874772ec8ca040084650e9ae)
+
 #!/usr/bin/env python3
 # ============================================================================
 #  AirPlay Deck —— 独立桌面 App（替代 Decky 插件路线）
@@ -34,7 +36,7 @@ from core import i18n
 from core import container as cman
 from core import avahi
 
-APP_VERSION = "0.6.10"
+APP_VERSION = "0.6.11"
 APP_TITLE = "AirPlay Deck"
 
 # 界面主题配色（深色 / 浅色两套）。_apply_qss 按当前主题取一套填进样式表模板，
