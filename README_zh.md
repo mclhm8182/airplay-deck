@@ -11,7 +11,7 @@
 ## 功能特性
 
 - 一键镜像：打开即用，在 iPhone / iPad 控制中心「屏幕镜像」里选择本机即可连接
-- 桌面模式稳定可用；游戏模式暂未支持，后续版本计划加入
+- 桌面模式稳定可用（推荐）；游戏模式有实验性 X11 鉴权修复（容器内以宿主 uid 运行、探针失败时优先 cookie 回退而非 unset），但**尚未完整支持**
 - 首次启动自动编译安装运行环境（distrobox 容器），无需手动装包
 - 音频、分辨率、帧率、显示模式均可调
 - 图形界面支持 8 种语言（简体中文、繁體中文、English、日本語、한국어、Français、Deutsch、Español），并跟随系统自动切换
@@ -34,7 +34,7 @@ AppImage 放在home 目录，SteamOS 系统更新不会清除它；运行环境�
 
 默认开启「直播式」音频同步：刷短视频、玩游戏时声音即时跟上，不会在切换内容时延迟几秒。如果你用来看电影、希望音画严格对齐，可在「视频与渲染」里打开「音频同步」。
 
-> 游戏模式（SteamOS 全屏接管）目前暂不支持，后续版本计划加入；当前请使用桌面模式。
+> 游戏模式（SteamOS 全屏接管）仍为实验性：本分支改进了容器内 X11 鉴权（以宿主 uid 运行探针/uxplay、更清晰的失败原因、cookie 优先于 unset）。桌面模式仍然是可靠路径；游戏模式仍可能因 gamescope / Steam LD_PRELOAD 失败。
 
 ## 截图
 
@@ -78,6 +78,9 @@ AppImage 放在home 目录，SteamOS 系统更新不会清除它；运行环境�
 ```bash
 podman exec -u 0 uxplay-env bash -lc "apt-get update && apt-get install -y gstreamer1.0-x gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-tools && rm -rf /home/*/.cache/gstreamer-1.0 /root/.cache/gstreamer-1.0 && gst-inspect-1.0 ximagesink"
 ```
+
+**游戏模式：能连上/有声音但没画面，或日志出现 Authorization required**
+SteamOS 游戏模式下 Xwayland 属于 Deck 用户（uid 1000），容器默认可能是 root。近期版本会以宿主 uid/gid 跑 X 探针和 uxplay，并在有 cookie 时避免回退到 `unset XAUTHORITY`。若仍失败，请在「检查与日志」导出日志（关注宿主 libX11 实测与容器内 uid），并改用桌面模式。
 
 ## 从源码构建（可选）
 
