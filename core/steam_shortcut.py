@@ -1,29 +1,29 @@
-"""把当前 App / AppImage 写成 Steam「非 Steam 游戏」快捷方式。
+"""把当前 App / AppImage 写成 Steam「非 Steam 游戏」，并尽量补齐图标与库封面。
 
-优先调用 SteamOS 自带的 `steamos-add-to-steam`；否则写入各用户
-`userdata/*/config/shortcuts.vdf`（二进制 VDF）。已存在相同目标路径时不重复添加。
+- 显示名固定为 AirPlay Deck
+- 若库中已有同名或同路径 / 旧版 AppImage 条目：就地更新 Exe / StartDir / icon
+- 写入 userdata/*/config/grid/ 封面（grid / portrait / hero / logo）
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
-
 
 APP_NAME = "AirPlay Deck"
 
 
 def detect_launch_target() -> Tuple[str, str]:
-    """返回 (可执行路径, 启动目录)。优先 APPIMAGE 环境变量。"""
     appimage = (os.environ.get("APPIMAGE") or "").strip()
     if appimage and os.path.isfile(appimage):
         p = str(Path(appimage).resolve())
         return p, str(Path(p).parent)
-    # AppImage 内部运行时 argv0 可能是 mount 点；仍尽量用绝对路径
     argv0 = os.path.abspath(sys.argv[0] if sys.argv else "")
     if argv0 and os.path.isfile(argv0):
         return argv0, str(Path(argv0).parent)
@@ -31,6 +31,18 @@ def detect_launch_target() -> Tuple[str, str]:
     if exe and os.path.isfile(exe):
         return exe, str(Path(exe).parent)
     raise FileNotFoundError("cannot detect AppImage / executable path")
+
+
+def detect_icon_path() -> str:
+    here = Path(__file__).resolve().parent.parent
+    for p in (
+        here / "resources" / "icon.png",
+        here / "resources" / "icon.svg",
+        Path(os.environ.get("APPDIR") or "") / "resources" / "icon.png",
+    ):
+        if p.is_file():
+            return str(p)
+    return ""
 
 
 def _steam_roots() -> List[Path]:
@@ -42,7 +54,6 @@ def _steam_roots() -> List[Path]:
         Path("/home/deck/.steam/steam"),
         Path("/home/deck/.local/share/Steam"),
     ]
-    # follow .steam/steam symlink carefully
     out: List[Path] = []
     seen = set()
     for c in candidates:
@@ -54,11 +65,9 @@ def _steam_roots() -> List[Path]:
         if key in seen:
             continue
         seen.add(key)
-        if (p / "userdata").is_dir() or c.exists():
-            out.append(p if (p / "userdata").is_dir() else c)
-    # de-dup preferring ones with userdata
-    with_ud = [p for p in out if (p / "userdata").is_dir()]
-    return with_ud or out
+        if (p / "userdata").is_dir():
+            out.append(p)
+    return out
 
 
 def _iter_shortcut_files(steam_root: Path) -> Iterable[Path]:
@@ -72,7 +81,6 @@ def _iter_shortcut_files(steam_root: Path) -> Iterable[Path]:
 
 
 def _quote_exe(path: str) -> str:
-    # Steam shortcuts store Exe with quotes
     if path.startswith('"') and path.endswith('"'):
         return path
     return f'"{path}"'
@@ -86,12 +94,22 @@ def _norm_exe_compare(s: str) -> str:
         return s.lower()
 
 
-# ---- minimal binary VDF (Steam shortcuts) ----
+def _looks_like_ours(entry: dict, target: str, app_name: str) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    name = str(entry.get("appname") or entry.get("AppName") or "").strip()
+    if name == app_name:
+        return True
+    exe = str(entry.get("Exe") or entry.get("exe") or "")
+    if _norm_exe_compare(exe) == _norm_exe_compare(target):
+        return True
+    low = _norm_exe_compare(exe).replace("-", "").replace("_", "")
+    if "airplaydeck" in low:
+        return True
+    return False
 
-_TYPE_MAP = 0x00
-_TYPE_STR = 0x01
-_TYPE_INT = 0x02
-_TYPE_END = 0x08
+
+_TYPE_MAP, _TYPE_STR, _TYPE_INT, _TYPE_END = 0x00, 0x01, 0x02, 0x08
 
 
 def _read_cstring(data: bytes, i: int) -> Tuple[str, int]:
@@ -117,8 +135,7 @@ def _parse_map(data: bytes, i: int = 0) -> Tuple[dict, int]:
             out[key] = struct.unpack_from("<i", data, i)[0]
             i += 4
         else:
-            # unknown — abort parse of this map
-            raise ValueError(f"unsupported VDF type {t:#x} at {i}")
+            raise ValueError(f"unsupported VDF type {t:#x}")
     return out, i
 
 
@@ -150,8 +167,7 @@ def _write_map(d: dict) -> bytes:
 def _load_shortcuts(path: Path) -> dict:
     if not path.exists() or path.stat().st_size == 0:
         return {"shortcuts": {}}
-    data = path.read_bytes()
-    root, _ = _parse_map(data, 0)
+    root, _ = _parse_map(path.read_bytes(), 0)
     if "shortcuts" not in root or not isinstance(root["shortcuts"], dict):
         root["shortcuts"] = {}
     return root
@@ -167,9 +183,10 @@ def _next_index(shortcuts: dict) -> str:
     return str(max(nums) + 1 if nums else 0)
 
 
-def _entry_matches(entry: dict, target: str) -> bool:
-    exe = entry.get("Exe") or entry.get("exe") or ""
-    return _norm_exe_compare(str(exe)) == _norm_exe_compare(target)
+def shortcut_grid_id(exe_path: str, app_name: str) -> int:
+    exe = _quote_exe(exe_path)
+    crc = zlib.crc32((exe + app_name).encode("utf-8")) & 0xFFFFFFFF
+    return crc | 0x80000000
 
 
 def _make_entry(app_name: str, exe_path: str, start_dir: str, icon: str = "") -> dict:
@@ -187,80 +204,98 @@ def _make_entry(app_name: str, exe_path: str, start_dir: str, icon: str = "") ->
         "Devkit": 0,
         "DevkitGameID": "",
         "LastPlayTime": 0,
+        "FlatpakAppID": "",
         "tags": {},
     }
 
 
-def _add_via_vdf(exe_path: str, start_dir: str, app_name: str = APP_NAME) -> Tuple[bool, str]:
+def _write_grid_art(config_dir: Path, exe_path: str, app_name: str, icon_path: str) -> None:
+    if not icon_path or not os.path.isfile(icon_path):
+        return
+    grid = config_dir / "grid"
+    grid.mkdir(parents=True, exist_ok=True)
+    gid = shortcut_grid_id(exe_path, app_name)
+    for name in (f"{gid}.png", f"{gid}p.png", f"{gid}_hero.png", f"{gid}_logo.png"):
+        try:
+            shutil.copyfile(icon_path, grid / name)
+        except Exception:
+            pass
+
+
+def _upsert_vdf(
+    exe_path: str,
+    start_dir: str,
+    app_name: str = APP_NAME,
+    icon_path: str = "",
+) -> Tuple[bool, str]:
     roots = _steam_roots()
     if not roots:
         return False, "steam_not_found"
-    wrote = 0
-    already = 0
+    touched = updated = added = 0
     for root in roots:
         for sc in _iter_shortcut_files(root):
             sc.parent.mkdir(parents=True, exist_ok=True)
             try:
                 data = _load_shortcuts(sc)
             except Exception:
-                # corrupt / unexpected — start fresh map but keep backup
                 try:
                     sc.rename(sc.with_suffix(".vdf.bak-airplaydeck"))
                 except Exception:
                     pass
                 data = {"shortcuts": {}}
             shortcuts = data.setdefault("shortcuts", {})
-            if any(_entry_matches(e, exe_path) for e in shortcuts.values() if isinstance(e, dict)):
-                already += 1
-                continue
-            idx = _next_index(shortcuts)
-            shortcuts[idx] = _make_entry(app_name, exe_path, start_dir)
+            found_key = None
+            for k, e in list(shortcuts.items()):
+                if _looks_like_ours(e, exe_path, app_name):
+                    found_key = k
+                    break
+            entry = _make_entry(app_name, exe_path, start_dir, icon=icon_path)
+            if found_key is not None:
+                old = shortcuts.get(found_key) or {}
+                if isinstance(old.get("tags"), dict):
+                    entry["tags"] = old["tags"]
+                shortcuts[found_key] = entry
+                updated += 1
+            else:
+                shortcuts[_next_index(shortcuts)] = entry
+                added += 1
             sc.write_bytes(_write_map(data))
-            wrote += 1
-    if wrote:
+            _write_grid_art(sc.parent, exe_path, app_name, icon_path)
+            touched += 1
+    if not touched:
+        return False, "no_userdata"
+    if updated and not added:
+        return True, "updated"
+    if added and not updated:
         return True, "added"
-    if already:
-        return True, "already"
-    return False, "no_userdata"
+    return True, "updated" if updated else "added"
 
 
 def _add_via_steamos(exe_path: str) -> Optional[bool]:
-    """Return True/False if helper ran; None if helper missing."""
     from shutil import which
     helper = which("steamos-add-to-steam")
     if not helper:
         return None
     try:
-        r = subprocess.run(
-            [helper, exe_path],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
+        r = subprocess.run([helper, exe_path], capture_output=True, text=True, timeout=60, check=False)
         return r.returncode == 0
     except Exception:
         return False
 
 
 def add_to_steam(app_name: str = APP_NAME) -> Tuple[bool, str]:
-    """添加当前程序到 Steam 库。
-
-    返回 (ok, code)：
-      added / already / steamos_ok / steam_not_found / no_userdata / no_target / error:...
-    """
+    app_name = (app_name or APP_NAME).strip() or APP_NAME
     try:
         exe_path, start_dir = detect_launch_target()
     except Exception as e:
         return False, f"no_target:{e}"
-
+    icon_path = detect_icon_path()
     via = _add_via_steamos(exe_path)
-    if via is True:
-        return True, "steamos_ok"
-    # steamos helper missing or failed — still try VDF (covers Desktop Mode / non-SteamOS)
-    ok, code = _add_via_vdf(exe_path, start_dir, app_name=app_name)
+    ok, code = _upsert_vdf(exe_path, start_dir, app_name=app_name, icon_path=icon_path)
     if ok:
         return True, code
+    if via is True:
+        return True, "steamos_ok"
     if via is False:
         return False, code if code != "steam_not_found" else "steamos_failed"
     return False, code
