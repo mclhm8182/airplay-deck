@@ -113,6 +113,12 @@ def build_args(s: Dict[str, Any], is_gamemode: bool) -> List[str]:
     if audio and audio != "auto":
         args += ["-as", str(audio)]
 
+    # 可选 PIN：仅在勾选启用且为 4 位数字时传 -pin NNNN（UxPlay 固定 PIN）
+    if s.get("pin_enabled"):
+        pin = "".join(ch for ch in str(s.get("pin_code") or "") if ch.isdigit())
+        if len(pin) == 4:
+            args += ["-pin", pin]
+
     extra = (s.get("extra") or "").strip()
     if extra:
         # 用户自己负责正确性；这里只做最基础的空白拆词
