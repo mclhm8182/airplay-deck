@@ -9,7 +9,7 @@
   * 引擎为**自编译的 UxPlay 1.73.7**（见 core/container.py）：它支持 -fs 全屏
     （man page：「-fs Full-screen (only with X11, Wayland, VAAPI, D3D11, kms)」，
     构建时需带 X11 支持）。因此 display_mode 现在会真实产生 -fs：
-      window     → 不传 -fs（普通窗口，靠 -s 1280x800 铺满）
+      window     → 桌面不传 -fs；游戏模式仍强制 -fs（gamescope 下窗口会缩成一小块）
       fullscreen → -fs
       auto       → 游戏模式 -fs；桌面模式不传
     注意：旧 apt 版 1.46 没有任何全屏选项（-fs/-vsync/-reset 都会 unknown option 退出），
