@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
-from . import audio, avahi, keepalive, session, uxplay_args, x11
+from . import audio, avahi, keepalive, session, uxplay_args, window_maximize, x11
 
 StatusCb = Callable[[str], None]          # "idle" | "waiting" | "connected" | "error"
 LogCb = Callable[[str, str], None]        # (level, message)
@@ -47,6 +47,8 @@ class Launcher:
         self._inhibit = None  # systemd-inhibit 子进程；投屏时阻止系统空闲/熄屏
         self._keepalive = None  # DisplayKeepalive：宿主 xset 周期性防熄屏
         self._active_display = None  # 探针/环境得到的 DISPLAY（宿主保活用）
+        self._maximizer = None  # 桌面窗口模式：宿主 WM 自动最大化投屏窗
+        self._want_window_maximize = False  # 本会话是否启用自动最大化（非 -fs 兜底）
         self._install_signal_handlers()
 
     # ---- 信号处理：让 Steam「退出游戏」能干净关掉 uxplay -------------------- #
@@ -155,6 +157,32 @@ class Launcher:
             pass
         self._log("info", "已解除保活防熄屏限制")
 
+    # ---- 桌面窗口自动最大化（宿主 WM；竖屏小窗问题）---------------------- #
+    def _start_maximizer(self) -> None:
+        """桌面 window/auto：启动后轮询最大化 uxplay 视频窗。幂等。"""
+        if not self._want_window_maximize:
+            return
+        if self._maximizer is not None:
+            return
+        device = (self.settings.get("device_name") or "").strip()
+        extra = [device] if device else []
+        preferred = self._active_display or os.environ.get("DISPLAY") or ":0"
+        self._maximizer = window_maximize.WindowMaximizer(
+            display=preferred,
+            extra_needles=extra,
+            log=self._log,
+        )
+        self._maximizer.start()
+
+    def _stop_maximizer(self) -> None:
+        m = self._maximizer
+        self._maximizer = None
+        if m is not None:
+            try:
+                m.stop()
+            except Exception:
+                pass
+
     # ---- 对外接口 ---------------------------------------------------------- #
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -182,6 +210,7 @@ class Launcher:
             container = (self.settings.get("distrobox_container") or "uxplay-env").strip()
             self._kill_container_uxplay(container)
             self._log("info", f"已停止接收，并清理容器 {container} 内的 uxplay")
+        self._stop_maximizer()
         self._stop_inhibit()  # 退出投屏：解除保活锁
 
     def is_running(self) -> bool:
@@ -246,6 +275,22 @@ class Launcher:
             self._log("error", f"参数组装失败: {e}")
             self._status("error")
             return
+
+        # 桌面 window/auto：优先宿主 WM 最大化投屏窗（竖屏流不再缩成小窗）。
+        # 若无 wmctrl/xdotool：最后手段追加 -fs，使画面仍铺满屏幕（见 window_maximize 模块注释）。
+        # Game Mode / 显式 fullscreen 已由 build_args 传 -fs，此处不干预。
+        self._want_window_maximize = False
+        if window_maximize.should_auto_maximize(is_gm, self.settings.get("display_mode")):
+            if window_maximize.tools_available():
+                self._want_window_maximize = True
+            else:
+                if "-fs" not in args:
+                    args.append("-fs")
+                self._log(
+                    "warn",
+                    "未找到 wmctrl/xdotool，桌面窗口模式改用 -fs 全屏兜底；"
+                    "建议安装 wmctrl（或 xdotool），或在设置中选择「全屏」显示模式",
+                )
 
         binpath = self._uxplay_bin()
         if self.settings.get("use_distrobox"):
@@ -358,9 +403,13 @@ class Launcher:
             # uxplay 已拉起即启用保活（不等到 CONNECTED）：长片投屏在
             # gamescope 下几分钟后可能黑屏，仅靠连接后 inhibit 来不及。
             self._start_inhibit()
+            # 桌面窗口模式：窗口可能稍晚才映射，后台重试最大化。
+            self._stop_maximizer()
+            self._start_maximizer()
             threading.Thread(target=self._pump, args=(self.proc,), daemon=True).start()
             ec = self.proc.wait()
             self.proc = None
+            self._stop_maximizer()
             run = time.time() - t0
             self._log("exit", f"uxplay 退出码={ec} 存活={run:.0f}s")
 
@@ -398,6 +447,7 @@ class Launcher:
             self._log("warn", "uxplay 异常退出，1 秒后重启…")
             time.sleep(1.0)
 
+        self._stop_maximizer()
         self._stop_inhibit()  # 兜底：循环退出时确保释放保活锁
         self._status("idle")
 
@@ -527,6 +577,13 @@ class Launcher:
                     self._cancel_waiting()
                     self._status("connected")
                     self._start_inhibit()  # 幂等：已在 waiting 启用，此处兜底
+                    # 首次最大化可能早于视频窗创建；CONNECTED 再试一次
+                    m = self._maximizer
+                    if m is not None:
+                        try:
+                            m.on_connected()
+                        except Exception:
+                            pass
 
                 # 只提示一次，别在 200 行刷屏里反复出现
                 # （用 getattr 兜底：这个循环外面包着 except Exception，真抛异常会静默掐掉日志）

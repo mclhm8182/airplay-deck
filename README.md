@@ -11,7 +11,7 @@ AirPlay Deck wraps the mature [UxPlay](https://github.com/FDH2/UxPlay) engine (s
 ## Features
 
 - One-click mirroring: open the app and connect from the iPhone / iPad Control Center "Screen Mirroring"
-- Desktop mode is stable and recommended; Game Mode has experimental fixes (X11 auth, forced `-fs`, long-session keepalive via stronger systemd-inhibit + host `xset` display poke) but is **not fully supported** yet.
+- Desktop mode is stable and recommended (window mode auto-maximizes portrait cast windows); Game Mode has experimental fixes (X11 auth, forced `-fs`, long-session keepalive via stronger systemd-inhibit + host `xset` display poke) but is **not fully supported** yet.
 - The runtime environment (a distrobox container) is compiled and installed automatically on first launch — no manual package setup
 - Audio, resolution, frame rate, and display mode are all adjustable
 - The GUI is available in 8 languages (Simplified Chinese, Traditional Chinese, English, Japanese, Korean, French, German, Spanish) and follows the system language automatically
@@ -28,7 +28,7 @@ The AppImage lives in your home directory, so SteamOS system updates won't remov
 
 1. Open AirPlay Deck and click "Start Receiving".
 2. Open "Screen Mirroring" in the iPhone / iPad Control Center and pick this device to begin mirroring.
-3. The picture shows up as a window; switch back to the app anytime with the taskbar or `Alt+Tab`. You can also set it to fullscreen in Settings.
+3. The picture shows up as a window; switch back to the app anytime with the taskbar or `Alt+Tab`. You can also set it to fullscreen in Settings. In Desktop **Window / Auto** mode, portrait streams (e.g. iPhone Photos videos) auto-maximize the cast window to fill the screen (needs host `wmctrl` or `xdotool`; Game Mode still forces `-fs`).
 
 **About audio**
 
@@ -48,7 +48,7 @@ Audio sync defaults to "live" mode: sound keeps up instantly when scrolling shor
 | --- | --- | --- |
 | Video sink | ximagesink | Pure X11 rendering, no OpenGL dependency; most stable under Xwayland / gamescope |
 | Frame rate | 30 | Only 30 / 60; arbitrary values can freeze mirroring in some apps |
-| Display mode | Window | Window: draggable small window; Fullscreen: borderless fill; Auto: app chooses per session |
+| Display mode | Window | Window: draggable window, portrait streams auto-maximize to fill; Fullscreen: borderless fill; Auto: same as window on desktop (auto-maximize), forced fullscreen in Game Mode |
 | Resolution | Auto | Auto requests a 1280×800 (Deck native) stream, filling the screen without cropping |
 | Audio sync | Off | Off: live-style instant audio; On: timestamp-based strict A/V sync (good for movies) |
 | Keep screen awake while mirroring | On | Prevents sleep while uxplay runs; Game Mode also uses host xset keepalive (experimental) |
