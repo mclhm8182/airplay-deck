@@ -34,7 +34,7 @@ from core import i18n
 from core import container as cman
 from core import avahi
 
-APP_VERSION = "0.7.2"
+APP_VERSION = "0.7.3"
 APP_TITLE = "AirPlay Deck"
 
 # 界面主题配色（深色 / 浅色两套）。_apply_qss 按当前主题取一套填进样式表模板，
@@ -528,6 +528,12 @@ class MainWindow(QMainWindow):
                 mv.addWidget(sep)
         v.addWidget(menu)
         v.addSpacing(12)
+        self.home_pin_label = QLabel("")
+        self.home_pin_label.setObjectName("bigStatus")
+        self.home_pin_label.setWordWrap(True)
+        self.home_pin_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        v.addWidget(self.home_pin_label)
+        self._refresh_home_pin()
         self.btn_add_steam = QPushButton(self.T("btn_add_steam"))
         self.btn_add_steam.setObjectName("primary")
         self.btn_add_steam.setMinimumHeight(44)
@@ -741,8 +747,9 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _random_pin() -> str:
+        """UxPlay 固定 PIN 合法范围 [0001:9999]；用 1000–9999，避开 0000/前导零。"""
         import random
-        return f"{random.randint(0, 9999):04d}"
+        return f"{random.randint(1000, 9999)}"
 
     def _refresh_pin_widgets(self) -> None:
         on = bool(getattr(self, "f_pin_enable", None) and self.f_pin_enable.isChecked())
@@ -754,19 +761,46 @@ class MainWindow(QMainWindow):
             self.f_pin_label.setText(self.T("pin_current", pin=self._pin_code))
         else:
             self.f_pin_label.setText(self.T("pin_value_empty"))
+        try:
+            self._refresh_home_pin()
+        except Exception:
+            pass
+
+    def _refresh_home_pin(self) -> None:
+        lbl = getattr(self, "home_pin_label", None)
+        if lbl is None:
+            return
+        on = bool(self.settings.get("pin_enabled")) if getattr(self, "f_pin_enable", None) is None else self.f_pin_enable.isChecked()
+        pin = "".join(ch for ch in str(getattr(self, "_pin_code", "") or self.settings.get("pin_code") or "") if ch.isdigit())[:4]
+        if on and len(pin) == 4:
+            lbl.setText(self.T("home_pin", pin=pin))
+            lbl.show()
+        else:
+            lbl.setText("")
+            lbl.hide()
 
     def _on_pin_enable_toggled(self, checked: bool) -> None:
         if checked:
-            if len(getattr(self, "_pin_code", "") or "") != 4:
+            if len(getattr(self, "_pin_code", "") or "") != 4 or self._pin_code == "0000":
                 self._pin_code = self._random_pin()
         self._refresh_pin_widgets()
+        try:
+            self._refresh_home_pin()
+        except Exception:
+            pass
+        # 立刻落盘；若正在接收会因 RUNTIME_KEYS 变化自动重启
+        self._save()
 
     def _regen_pin(self) -> None:
         if not self.f_pin_enable.isChecked():
             return
         self._pin_code = self._random_pin()
         self._refresh_pin_widgets()
-        self._flash_saved(self.T("pin_current", pin=self._pin_code))
+        try:
+            self._refresh_home_pin()
+        except Exception:
+            pass
+        self._save()  # 落盘并在接收中时重启，保证 UxPlay -pin 与界面一致
 
     def _on_lang_changed(self, _idx: int):
         if self._rebuilding or self._lang_combo is None:
@@ -1504,6 +1538,11 @@ class MainWindow(QMainWindow):
                     bool(self.settings.get("append_hostname")),
                 )
             )
+        except Exception:
+            pass
+
+        try:
+            self._refresh_home_pin()
         except Exception:
             pass
 
