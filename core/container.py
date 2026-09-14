@@ -46,12 +46,16 @@ BASE_IMAGE = "docker.io/library/ubuntu:22.04"
 #     空指针解引用（安全公告 GHSA-479c-ww7g-wgp8），并适配 iOS 27 的 TEARDOWN 变更。
 # 因此不再用 apt 的 uxplay，改为在容器内**从源码编译**该版本（见 install_sh 第 2.5 步）。
 UXPLAY_VERSION = "1.73.7"
+# 含 iOS PIN 20-byte proof 修复的上游提交（晚于 v1.73.7 tag）
+UXPLAY_GIT_SHA = "44024fe07f7f61d459de383e8a1047acdb0c7555"
+UXPLAY_ENGINE_TAG = "1.73.7+ios-pin20"
 
 # 源码下载地址（按序尝试）。GitHub 在部分网络下不可达，用户可手动放包走离线分支。
 UXPLAY_SRC_URLS = [
+    # 优先：含 iOS PIN proof 修复的提交（v1.73.7 tag 仍拒收 20 字节 proof）
+    "https://github.com/FDH2/UxPlay/archive/44024fe07f7f61d459de383e8a1047acdb0c7555.tar.gz",
+    "https://codeload.github.com/FDH2/UxPlay/tar.gz/44024fe07f7f61d459de383e8a1047acdb0c7555",
     f"https://github.com/FDH2/UxPlay/archive/refs/tags/v{UXPLAY_VERSION}.tar.gz",
-    f"https://codeload.github.com/FDH2/UxPlay/tar.gz/refs/tags/v{UXPLAY_VERSION}",
-    f"https://api.github.com/repos/FDH2/UxPlay/tarball/v{UXPLAY_VERSION}",
 ]
 
 # 容器内要装的包：编译 UxPlay 的工具链/开发库 + GStreamer 全套运行时插件
@@ -96,7 +100,7 @@ def _uxplay_build_sh(ver: str, urls: List[str]) -> str:
     urls_lines = ("for _u in \\\n"
                   + "".join(f'  "{u}" \\\n' for u in urls[:-1])
                   + f'  "{urls[-1]}"; do\n')
-    manual = f"/home/deck/uxplay-{ver}.tar.gz"
+    manual = f"$HOME/uxplay-{ver}.tar.gz"
     return (
         f"# 2.5) 从源码编译 UxPlay {ver}（jammy 仓库只有 1.46，太旧且含安全漏洞）\n"
         f"if [ -s \"{manual}\" ]; then\n"
@@ -134,7 +138,9 @@ def _uxplay_build_sh(ver: str, urls: List[str]) -> str:
         f"fi\n"
         f"ldconfig\n"
         f"cd /\n"
-        f"echo \"[install] UxPlay 就绪：$(command -v uxplay)  版本=$(timeout 5 uxplay -v 2>&1 | head -1)\"\n"
+        f"mkdir -p /usr/local/share\n"
+        f"echo \"{UXPLAY_ENGINE_TAG}\" > /usr/local/share/airplay-deck-engine.tag\n"
+        f"echo \"[install] UxPlay 就绪：$(command -v uxplay)  版本=$(timeout 5 uxplay -v 2>&1 | head -1)  tag=$(cat /usr/local/share/airplay-deck-engine.tag 2>/dev/null)\"\n"
     )
 
 
@@ -211,21 +217,35 @@ def uxplay_version(container: str) -> str:
     return ""
 
 
-def uxplay_ready(container: str) -> bool:
-    """容器内 uxplay 是否可用**且为目标版本** UXPLAY_VERSION。
+def _engine_tag(container: str) -> str:
+    """读取容器内我们写入的引擎标记（含 iOS PIN 补丁世代）。"""
+    if not podman_available():
+        return ""
+    try:
+        r = subprocess.run(
+            ["podman", "exec", *_SANITIZE_ENV, container, "bash", "-lc",
+             "cat /usr/local/share/airplay-deck-engine.tag 2>/dev/null || true"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return (r.stdout or "").strip()
+    except Exception:
+        return ""
 
-    为什么要查版本：旧容器里可能已有 apt 装的 UxPlay 1.46（/usr/bin/uxplay），
-    若只判断「有没有 uxplay」，点「安装/重建运行环境」会被判「已就绪」直接跳过，
-    永远升不到 1.73.7。这里要求版本匹配，才能触发重新编译。
-    取不到版本号时退回「存在即就绪」，避免因 `-v` 输出格式差异导致每次都重装。
+
+def uxplay_ready(container: str) -> bool:
+    """容器内 uxplay 是否可用、版本匹配，且带有当前 ENGINE_TAG（PIN 补丁世代）。
+
+    旧容器可能已有 1.73.7 但仍会拒收 iOS 20 字节 PIN proof；仅看版本不够，
+    必须匹配 UXPLAY_ENGINE_TAG 才会触发重建。
     """
     if not uxplay_installed(container):
+        return False
+    if _engine_tag(container) != UXPLAY_ENGINE_TAG:
         return False
     v = uxplay_version(container)
     if not v:
         return True
     return UXPLAY_VERSION in v
-
 
 def video_sink_ready(container: str) -> bool:
     """容器内是否存在 ximagesink 渲染后端（uxplay 出画面必需）。
