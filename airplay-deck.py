@@ -34,7 +34,7 @@ from core import i18n
 from core import container as cman
 from core import avahi
 
-APP_VERSION = "0.7.5"
+APP_VERSION = "0.7.6"
 APP_TITLE = "AirPlay Deck"
 
 # 界面主题配色（深色 / 浅色两套）。_apply_qss 按当前主题取一套填进样式表模板，
