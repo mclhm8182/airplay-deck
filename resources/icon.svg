@@ -6,11 +6,8 @@
       <stop offset="1" stop-color="#97979b"/>
     </linearGradient>
   </defs>
-  <!-- iOS 风格 squircle 底板（圆角约占边长 22%） -->
-  <rect width="512" height="512" rx="112" ry="112" fill="url(#bg)"/>
-
-  <!-- AirPlay 标志：上方三道同心弧（圆心 256,280；sweep=1 保证弧开口朝下呈 ∩ 形）
-       + 下方实心三角（广播塔），整体垂直居中于 512 -->
+  <!-- full square — no rounded corners, so no fringe -->
+  <rect width="512" height="512" fill="url(#bg)"/>
   <g fill="none" stroke="#1c1c1e" stroke-width="26" stroke-linecap="round">
     <path d="M195 245 A 70 70 0 0 1 317 245"/>
     <path d="M161 225 A 110 110 0 0 1 351 225"/>
