@@ -16,6 +16,7 @@
     升级引擎后这些都已经可用。
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -113,11 +114,27 @@ def build_args(s: Dict[str, Any], is_gamemode: bool) -> List[str]:
     if audio and audio != "auto":
         args += ["-as", str(audio)]
 
-    # 可选 PIN：仅在勾选启用且为 4 位数字时传 -pin NNNN（UxPlay 固定 PIN）
+    # 可选 PIN：UxPlay 固定 PIN 范围 [0001:9999]（0000 非法）；内部存为 n+10000。
+    # 同时写入持久 -key / -reg，否则配对公钥每次变、iOS 输对 PIN 仍会失败。
     if s.get("pin_enabled"):
         pin = "".join(ch for ch in str(s.get("pin_code") or "") if ch.isdigit())
-        if len(pin) == 4:
+        if len(pin) == 4 and pin != "0000":
             args += ["-pin", pin]
+            state = Path.home() / ".local" / "state" / "airplay-deck"
+            try:
+                state.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            key = state / "uxplay.pem"
+            reg = state / "uxplay.register"
+            # 预创建空文件，让容器内 UxPlay 的 file_has_write_access 能通过
+            for fp in (key, reg):
+                try:
+                    if not fp.exists():
+                        fp.touch()
+                except Exception:
+                    pass
+            args += ["-key", str(key), "-reg", str(reg)]
 
     extra = (s.get("extra") or "").strip()
     if extra:
