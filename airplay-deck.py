@@ -691,15 +691,15 @@ class MainWindow(QMainWindow):
         self.f_autostart.setChecked(bool(self.settings.get("autostart")))
         form.addRow(self._form_label(""), self.f_autostart)
 
-        # 可选 PIN：默认关闭；勾选后自动生成 4 位随机数（只读展示）
+        # 可选 PIN：与上方「追加主机名 / 开机自启」同款排版（左侧空标签 + 勾选）
         self.f_pin_enable = QCheckBox(self.T("pin_enable"))
         self.f_pin_enable.setChecked(bool(self.settings.get("pin_enabled")))
         self._pin_code = "".join(ch for ch in str(self.settings.get("pin_code") or "") if ch.isdigit())[:4]
         self.f_pin_label = QLabel()
-        self.f_pin_label.setObjectName("bigStatus")
+        self.f_pin_label.setObjectName("hint")
         self.f_pin_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.btn_pin_regen = QPushButton(self.T("pin_regen"))
-        self.btn_pin_regen.setMinimumHeight(36)
+        self.btn_pin_regen.setMinimumHeight(32)
         self.btn_pin_regen.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pin_regen.clicked.connect(self._regen_pin)
         self.f_pin_hint = QLabel(self.T("pin_hint"))
@@ -710,10 +710,15 @@ class MainWindow(QMainWindow):
         _pin_v.setContentsMargins(0, 0, 0, 0)
         _pin_v.setSpacing(4)
         _pin_v.addWidget(self.f_pin_enable)
-        _pin_v.addWidget(self.f_pin_label)
-        _pin_v.addWidget(self.btn_pin_regen)
+        _pin_row = QWidget()
+        _pin_h = QHBoxLayout(_pin_row)
+        _pin_h.setContentsMargins(0, 0, 0, 0)
+        _pin_h.setSpacing(8)
+        _pin_h.addWidget(self.f_pin_label, 1)
+        _pin_h.addWidget(self.btn_pin_regen, 0)
+        _pin_v.addWidget(_pin_row)
         _pin_v.addWidget(self.f_pin_hint)
-        form.addRow(self._form_label(self.T("pin_label")), _pin_box)
+        form.addRow(self._form_label(""), _pin_box)
         self.f_pin_enable.toggled.connect(self._on_pin_enable_toggled)
         self._refresh_pin_widgets()
 
@@ -753,14 +758,19 @@ class MainWindow(QMainWindow):
 
     def _refresh_pin_widgets(self) -> None:
         on = bool(getattr(self, "f_pin_enable", None) and self.f_pin_enable.isChecked())
+        pin_ok = on and len(getattr(self, "_pin_code", "") or "") == 4
+        if getattr(self, "f_pin_label", None) is not None:
+            if pin_ok:
+                self.f_pin_label.setText(self.T("pin_current", pin=self._pin_code))
+                self.f_pin_label.show()
+            else:
+                self.f_pin_label.setText("")
+                self.f_pin_label.hide()
         if getattr(self, "btn_pin_regen", None) is not None:
-            self.btn_pin_regen.setEnabled(on)
-        if getattr(self, "f_pin_label", None) is None:
-            return
-        if on and len(getattr(self, "_pin_code", "") or "") == 4:
-            self.f_pin_label.setText(self.T("pin_current", pin=self._pin_code))
-        else:
-            self.f_pin_label.setText(self.T("pin_value_empty"))
+            self.btn_pin_regen.setEnabled(pin_ok)
+            self.btn_pin_regen.setVisible(pin_ok)
+        if getattr(self, "f_pin_hint", None) is not None:
+            self.f_pin_hint.setVisible(on)
         try:
             self._refresh_home_pin()
         except Exception:
