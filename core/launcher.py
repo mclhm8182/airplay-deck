@@ -77,15 +77,16 @@ class Launcher:
         if self._inhibit is None:
             why = "AirPlay 投屏中，保持屏幕常亮"
             # idle:sleep 为下限；idle 覆盖 logind 空闲熄屏动作
-            base = ["systemd-inhibit", "--what=idle:sleep",
+            # 只用 idle、不用 mode=block：避免挡住电源键，减少强制黑屏后无法恢复
+            base = ["systemd-inhibit", "--what=idle",
                     "--why=" + why, "sleep", "infinity"]
             started = False
             last_err = None
             for cmd in (
-                ["systemd-inhibit", "--what=idle:sleep", "--mode=block",
+                ["systemd-inhibit", "--what=idle",
                  "--who=AirPlayDeck", "--why=" + why, "sleep", "infinity"],
-                ["systemd-inhibit", "--what=idle:sleep", "--mode=block",
-                 "--why=" + why, "sleep", "infinity"],
+                ["systemd-inhibit", "--what=idle:sleep",
+                 "--who=AirPlayDeck", "--why=" + why, "sleep", "infinity"],
                 base,
             ):
                 try:
@@ -108,7 +109,7 @@ class Launcher:
                     self._log(
                         "info",
                         "已启用保活防熄屏（systemd-inhibit 接管空闲/休眠"
-                        f"{mode_note}；what=idle:sleep）",
+                        f"{mode_note}；what=idle；不 block 电源键）",
                     )
                     started = True
                     break
@@ -146,6 +147,12 @@ class Launcher:
         if ka is not None:
             try:
                 ka.stop(wake=True)
+            except Exception:
+                pass
+        else:
+            try:
+                keepalive.restore_display_defaults(
+                    keepalive.resolve_displays(self._active_display), self._log)
             except Exception:
                 pass
 
