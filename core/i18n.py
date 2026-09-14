@@ -190,6 +190,8 @@ S: Dict[str, Dict[str, str]] = {
                      "en": "Current PIN: {pin}", "ja": "現在の PIN: {pin}",
                      "ko": "현재 PIN: {pin}", "fr": "PIN actuel : {pin}",
                      "de": "Aktuelle PIN: {pin}", "es": "PIN actual: {pin}"},
+    "home_pin": {"zh_CN": "投屏 PIN：{pin}（在 iPhone 提示时输入）", "zh_TW": "投屏 PIN：{pin}（在 iPhone 提示時輸入）",
+                 "en": "Cast PIN: {pin} (enter on iPhone prompt)", "ja": "キャストPIN：{pin}（iPhoneの画面で入力）"},
     "pin_value_empty": {"zh_CN": "（开启后自动生成）", "zh_TW": "（開啟後自動產生）",
                        "en": "(generated when enabled)", "ja": "（有効化すると自動生成）",
                        "ko": "(켜면 자동 생성)", "fr": "(généré à l'activation)",
@@ -200,14 +202,7 @@ S: Dict[str, Dict[str, str]] = {
                    "de": "PIN neu erzeugen", "es": "Regenerar PIN"},
 
     
-    "pin_hint": {"zh_CN": "勾选后自动生成 4 位 PIN；连接时在 iPhone / iPad 上输入下方显示的数字。",
-                 "zh_TW": "勾選後自動產生 4 位 PIN；連線時在 iPhone / iPad 上輸入下方顯示的數字。",
-                 "en": "When enabled, a 4-digit PIN is generated automatically — enter it on iPhone / iPad when connecting.",
-                 "ja": "有効にすると 4 桁 PIN を自動生成します。接続時に iPhone / iPad で下の数字を入力してください。",
-                 "ko": "켜면 4자리 PIN이 자동 생성됩니다. 연결 시 iPhone/iPad에 아래 숫자를 입력하세요.",
-                 "fr": "Si activé, un PIN à 4 chiffres est généré — saisissez-le sur iPhone / iPad.",
-                 "de": "Wenn aktiv, wird eine 4-stellige PIN erzeugt — auf iPhone / iPad eingeben.",
-                 "es": "Si está activo, se genera un PIN de 4 dígitos; introdúcelo en iPhone / iPad."},
+    "pin_hint": {"zh_CN": "勾选后自动生成 4 位 PIN，并持久保存配对密钥。连接时请输入下方数字；改 PIN 后若正在接收会自动重启。", "zh_TW": "勾選後自動產生 4 位 PIN，並持久保存配對金鑰。連接時請輸入下方數字；改 PIN 後若正在接收會自動重啟。", "en": "Generates a 4-digit PIN and keeps pairing keys. Enter it on iPhone; changing PIN restarts receive if active.", "ja": "4桁PINを自動生成し、ペアリング鍵を保持します。iPhoneで入力。PIN変更時は受信中なら再起動します。"},
     
     "pin_invalid": {"zh_CN": "PIN 异常，请关闭后重新勾选以自动生成。",
                     "zh_TW": "PIN 異常，請關閉後重新勾選以自動產生。",
