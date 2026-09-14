@@ -18,7 +18,7 @@ import subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtCore import (
-    QObject, Qt, Signal, QStandardPaths, QUrl,
+    QObject, Qt, Signal, QStandardPaths, QUrl, QLockFile,
     QPropertyAnimation, QParallelAnimationGroup, QAbstractAnimation,
     QEasingCurve, QPoint, QTimer, QThread,
 )
@@ -34,14 +34,14 @@ from core import i18n
 from core import container as cman
 from core import avahi
 
-APP_VERSION = "0.7.3"
+APP_VERSION = "0.7.4"
 APP_TITLE = "AirPlay Deck"
 
 # 界面主题配色（深色 / 浅色两套）。_apply_qss 按当前主题取一套填进样式表模板，
 # 不把颜色写死在样式里——否则加主题要整段复制，改一处还得同步两处。
 QSS_PALETTE = {
     "dark": {
-        "bg": "#1a1b1e", "panel": "#25272b", "border": "#2f3136",
+        "bg": "#1a1b1e", "panel": "#25272b", "check_bg": "#3a3c42", "check_border": "#6a6d74", "border": "#2f3136",
         "text": "#e6e7ea", "text_mid": "#c3c6cc", "text_dim": "#8b8d93",
         "section": "#b8bcc4", "subheader": "#1f2024", "sep": "#2a2c30",
         "input_bg": "#1a1b1e", "input_border": "#3a3c41",
@@ -57,7 +57,7 @@ QSS_PALETTE = {
         "row_hover": "#2a2c30", "menu_sel_text": "#ffffff",
     },
     "light": {
-        "bg": "#f4f5f7", "panel": "#ffffff", "border": "#dfe1e5",
+        "bg": "#f4f5f7", "panel": "#ffffff", "check_bg": "#e8eaed", "check_border": "#b0b4bb", "border": "#dfe1e5",
         "text": "#1c1e21", "text_mid": "#4a4d52", "text_dim": "#6b6f76",
         "section": "#4a4d52", "subheader": "#eceef1", "sep": "#dfe1e5",
         "input_bg": "#ffffff", "input_border": "#c7cad0",
@@ -496,7 +496,7 @@ class MainWindow(QMainWindow):
                 bool(self.settings.get("append_hostname")),
             )
         )
-        self.device_hint.setObjectName("hint")
+        self.device_hint.setObjectName("deviceHint")
         cv.addWidget(self.device_hint)
         v.addWidget(card)
         v.addSpacing(12)
@@ -556,11 +556,11 @@ class MainWindow(QMainWindow):
         icon_lbl.setPixmap(self._menu_icon(icon_name, 26))
         h.addWidget(icon_lbl)
         lbl = QLabel(text)
-        lbl.setStyleSheet("font-size: 15px; color: #e6e7ea;")
+        lbl.setObjectName("menuRowText")
         h.addWidget(lbl)
         h.addStretch(1)
         chev = QLabel("›")
-        chev.setStyleSheet("color: #6c6e74; font-size: 28px;")
+        chev.setObjectName("menuRowChev")
         h.addWidget(chev)
         return w
 
@@ -1163,6 +1163,8 @@ class MainWindow(QMainWindow):
 
     def _apply_qss(self) -> None:
         p = dict(QSS_PALETTE[self._resolve_theme()])
+        p.setdefault("check_bg", p.get("panel", "#333"))
+        p.setdefault("check_border", p.get("input_border", "#666"))
         self.setStyleSheet("""
             QMainWindow, QWidget { background: %(bg)s; color: %(text)s;
                 font-family: 'Noto Sans CJK SC', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -1173,6 +1175,7 @@ class MainWindow(QMainWindow):
             QLabel#sectionTitle { color: %(section)s; font-size: 12px; font-weight: 600;
                 padding-bottom: 2px; letter-spacing: 0.3px; }
             QLabel#hint { color: %(text_dim)s; font-size: 11px; }
+            QLabel#deviceHint { color: %(text)s; font-size: 13px; background: transparent; }
             QLabel#aboutBody { color: %(text_mid)s; font-size: 12px; line-height: 1.7; }
             QLabel#bigStatus { font-size: 17px; font-weight: 600; color: %(text)s; }
             QFrame { border: none; }
@@ -1182,6 +1185,8 @@ class MainWindow(QMainWindow):
             QWidget#subHeader { background: %(subheader)s; border-bottom: 1px solid %(sep)s; }
             QWidget#menuRow { background: transparent; }
             QWidget#menuRow:hover { background: %(row_hover)s; }
+            QWidget#menuRow QLabel#menuRowText { font-size: 15px; color: %(text)s; background: transparent; }
+            QWidget#menuRow QLabel#menuRowChev { color: %(text_dim)s; font-size: 28px; background: transparent; }
             QLabel#subTitle { font-size: 16px; font-weight: 600; color: %(text)s; }
             /* 表单左侧标签：与右侧输入框等高（40px）+ 垂直居中，保证文字齐平 */
             QLabel#formLabel { font-size: 13px; color: %(text_mid)s;
@@ -1207,7 +1212,7 @@ class MainWindow(QMainWindow):
 
             QCheckBox { color: %(text)s; spacing: 10px; min-height: 26px; }
             QCheckBox::indicator { width: 20px; height: 20px; border-radius: 5px;
-                border: 1px solid %(input_border)s; background: %(input_bg)s; }
+                border: 1px solid %(check_border)s; background: %(check_bg)s; }
             QCheckBox::indicator:hover { border-color: %(accent)s; }
             QCheckBox::indicator:checked { background: %(accent)s; border-color: %(accent)s; }
 
@@ -1332,6 +1337,11 @@ class MainWindow(QMainWindow):
             self._start()
         else:
             self._stop()
+        try:
+            from core import keepalive as _ka
+            _ka.restore_display_defaults(log=lambda lvl, msg: self._log(lvl, msg))
+        except Exception:
+            pass
 
     def _will_takeover(self) -> bool:
         """本次接收是否隐藏主窗口（旧版游戏模式用，已废止，恒为 False）。
@@ -1359,6 +1369,10 @@ class MainWindow(QMainWindow):
             log_cb=_log_from_worker,
             status_cb=lambda st: self.bridge.status_signal.emit(st),
         )
+        try:
+            self._log_pin_diagnostics("start_receive")
+        except Exception:
+            pass
         self.launcher.start()
         self.toggle.setChecked(True)
         # 不再隐藏主窗口、不再显示悬浮控制条（见 _will_takeover 的说明）。
@@ -1540,6 +1554,11 @@ class MainWindow(QMainWindow):
                 self._flash_saved(str(e))
             self._log("error", str(e))
             return
+        try:
+            if self.settings.get("pin_enabled"):
+                self._log_pin_diagnostics("save")
+        except Exception:
+            pass
         try:
             self.device_hint.setText(
                 self.T("device_prefix")
@@ -1908,6 +1927,11 @@ class MainWindow(QMainWindow):
     # ---- 退出 --------------------------------------------------------------- #
     def _quit(self):
         self._stop()
+        try:
+            from core import keepalive as _ka
+            _ka.restore_display_defaults(log=lambda lvl, msg: self._log(lvl, msg))
+        except Exception:
+            pass
         QApplication.quit()
 
     def closeEvent(self, event):
@@ -1922,6 +1946,15 @@ class MainWindow(QMainWindow):
 def main():
     cfg.ensure_dirs()
     app = QApplication(sys.argv)
+    # 单实例：避免双开导致两个 uxplay 抢 PIN 配对（日志里成对出现）
+    _lock_dir = os.path.join(os.path.expanduser("~"), ".local", "state", "airplay-deck")
+    os.makedirs(_lock_dir, exist_ok=True)
+    _lock = QLockFile(os.path.join(_lock_dir, "airplay-deck.lock"))
+    _lock.setStaleLockTime(30_000)
+    if not _lock.tryLock(100):
+        print("AirPlay Deck 已在运行（单实例）", flush=True)
+        return 1
+
     app.setApplicationName(APP_TITLE)
     # 强制 Fusion 风格：避免 macOS native style 把 QCheckBox 渲染成开关
     # 破坏表单对齐（Linux KDE Breeze 下也建议走 Fusion 以保证跨设备一致）。
