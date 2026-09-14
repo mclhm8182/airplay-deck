@@ -1,7 +1,7 @@
-"""把当前 App / AppImage 写成 Steam「非 Steam 游戏」，并尽量补齐图标与库封面。
+"""把当前 App / AppImage 写成 Steam「非 Steam 游戏」，并补齐图标与库封面。
 
-- 显示名固定为 AirPlay Deck
-- 若库中已有同名或同路径 / 旧版 AppImage 条目：就地更新 Exe / StartDir / icon
+- 显示名固定为 AirPlay Deck（覆盖 steamos-add-to-steam 用文件名命名的条目）
+- 以 shortcuts.vdf 为唯一真相源（不再依赖 steamos 助手命名）
 - 写入 userdata/*/config/grid/ 封面（grid / portrait / hero / logo）
 """
 
@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 import shutil
 import struct
-import subprocess
 import sys
 import zlib
 from pathlib import Path
@@ -33,27 +32,61 @@ def detect_launch_target() -> Tuple[str, str]:
     raise FileNotFoundError("cannot detect AppImage / executable path")
 
 
-def detect_icon_path() -> str:
+def _resource_roots() -> List[Path]:
     here = Path(__file__).resolve().parent.parent
-    for p in (
-        here / "resources" / "icon.png",
-        here / "resources" / "icon.svg",
-        Path(os.environ.get("APPDIR") or "") / "resources" / "icon.png",
-    ):
-        if p.is_file():
-            return str(p)
+    roots = [here]
+    appdir = (os.environ.get("APPDIR") or "").strip()
+    if appdir:
+        roots.append(Path(appdir) / "opt" / "airplay-deck")
+        roots.append(Path(appdir))
+    return roots
+
+
+def detect_icon_path() -> str:
+    for root in _resource_roots():
+        for name in ("icon.png", "icon.svg"):
+            p = root / "resources" / name
+            if p.is_file():
+                return str(p)
     return ""
+
+
+def detect_steam_art() -> dict:
+    """返回 grid/portrait/hero/logo 绝对路径（缺的用 icon 兜底）。"""
+    icon = detect_icon_path()
+    out = {"grid": "", "portrait": "", "hero": "", "logo": ""}
+    for root in _resource_roots():
+        steam = root / "resources" / "steam"
+        for key in list(out.keys()):
+            if out[key]:
+                continue
+            p = steam / f"{key}.png"
+            if p.is_file():
+                out[key] = str(p)
+    for key in out:
+        if not out[key] and icon:
+            out[key] = icon
+    return out
 
 
 def _steam_roots() -> List[Path]:
     home = Path.home()
     candidates = [
         home / ".steam" / "steam",
+        home / ".steam" / "root",
         home / ".local" / "share" / "Steam",
         home / ".var" / "app" / "com.valvesoftware.Steam" / "data" / "Steam",
         Path("/home/deck/.steam/steam"),
+        Path("/home/deck/.steam/root"),
         Path("/home/deck/.local/share/Steam"),
     ]
+    # Flatpak / symlink friendly: also follow ~/.steam/steam.pid parent chains
+    for extra in (home / ".steam" / "steam.pid",):
+        try:
+            if extra.exists():
+                candidates.append(extra.resolve().parent)
+        except Exception:
+            pass
     out: List[Path] = []
     seen = set()
     for c in candidates:
@@ -94,13 +127,34 @@ def _norm_exe_compare(s: str) -> str:
         return s.lower()
 
 
+def _entry_name(entry: dict) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    for k in ("AppName", "appname", "Appname"):
+        if k in entry and str(entry[k]).strip():
+            return str(entry[k]).strip()
+    return ""
+
+
+def _entry_exe(entry: dict) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    for k in ("Exe", "exe", "AppExe"):
+        if k in entry and str(entry[k]).strip():
+            return str(entry[k]).strip()
+    return ""
+
+
 def _looks_like_ours(entry: dict, target: str, app_name: str) -> bool:
     if not isinstance(entry, dict):
         return False
-    name = str(entry.get("appname") or entry.get("AppName") or "").strip()
+    name = _entry_name(entry)
     if name == app_name:
         return True
-    exe = str(entry.get("Exe") or entry.get("exe") or "")
+    # steamos-add-to-steam 常用 AppImage 文件名当显示名
+    if name.lower().startswith("airplaydeck") and name.lower().endswith(".appimage"):
+        return True
+    exe = _entry_exe(entry)
     if _norm_exe_compare(exe) == _norm_exe_compare(target):
         return True
     low = _norm_exe_compare(exe).replace("-", "").replace("_", "")
@@ -184,14 +238,18 @@ def _next_index(shortcuts: dict) -> str:
 
 
 def shortcut_grid_id(exe_path: str, app_name: str) -> int:
+    """SteamGrid 风格 short app id：crc32('\"'+exe+'\"'+appname) | 0x80000000。"""
     exe = _quote_exe(exe_path)
     crc = zlib.crc32((exe + app_name).encode("utf-8")) & 0xFFFFFFFF
     return crc | 0x80000000
 
 
 def _make_entry(app_name: str, exe_path: str, start_dir: str, icon: str = "") -> dict:
+    # Steam 二进制 shortcuts.vdf 常见键名（大小写敏感）
     return {
         "appname": app_name,
+        "AppName": app_name,
+        "exe": _quote_exe(exe_path),
         "Exe": _quote_exe(exe_path),
         "StartDir": _quote_exe(start_dir),
         "icon": icon or "",
@@ -209,15 +267,38 @@ def _make_entry(app_name: str, exe_path: str, start_dir: str, icon: str = "") ->
     }
 
 
-def _write_grid_art(config_dir: Path, exe_path: str, app_name: str, icon_path: str) -> None:
+def _durable_icon_copy(icon_path: str) -> str:
+    """AppImage 挂载路径会消失；把图标拷到用户可写目录再填入 Steam icon 字段。"""
     if not icon_path or not os.path.isfile(icon_path):
-        return
+        return ""
+    dest_dir = Path.home() / ".local" / "share" / "airplay-deck"
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / "icon.png"
+        shutil.copyfile(icon_path, dest)
+        return str(dest)
+    except Exception:
+        return icon_path
+
+
+def _write_grid_art(config_dir: Path, exe_path: str, app_name: str, art: dict) -> None:
     grid = config_dir / "grid"
-    grid.mkdir(parents=True, exist_ok=True)
+    try:
+        grid.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
     gid = shortcut_grid_id(exe_path, app_name)
-    for name in (f"{gid}.png", f"{gid}p.png", f"{gid}_hero.png", f"{gid}_logo.png"):
+    mapping = {
+        f"{gid}.png": art.get("grid") or "",
+        f"{gid}p.png": art.get("portrait") or "",
+        f"{gid}_hero.png": art.get("hero") or "",
+        f"{gid}_logo.png": art.get("logo") or "",
+    }
+    for name, src in mapping.items():
+        if not src or not os.path.isfile(src):
+            continue
         try:
-            shutil.copyfile(icon_path, grid / name)
+            shutil.copyfile(src, grid / name)
         except Exception:
             pass
 
@@ -227,10 +308,13 @@ def _upsert_vdf(
     start_dir: str,
     app_name: str = APP_NAME,
     icon_path: str = "",
+    art: Optional[dict] = None,
 ) -> Tuple[bool, str]:
     roots = _steam_roots()
     if not roots:
         return False, "steam_not_found"
+    art = art or detect_steam_art()
+    icon_path = _durable_icon_copy(icon_path or art.get("logo") or art.get("grid") or "")
     touched = updated = added = 0
     for root in roots:
         for sc in _iter_shortcut_files(root):
@@ -244,23 +328,23 @@ def _upsert_vdf(
                     pass
                 data = {"shortcuts": {}}
             shortcuts = data.setdefault("shortcuts", {})
-            found_key = None
-            for k, e in list(shortcuts.items()):
-                if _looks_like_ours(e, exe_path, app_name):
-                    found_key = k
-                    break
+            # 合并所有「像我们」的条目成一条，删掉 steamos 用文件名建的重复项
+            ours_keys = [k for k, e in list(shortcuts.items()) if _looks_like_ours(e, exe_path, app_name)]
+            keep = ours_keys[0] if ours_keys else None
+            for k in ours_keys[1:]:
+                shortcuts.pop(k, None)
             entry = _make_entry(app_name, exe_path, start_dir, icon=icon_path)
-            if found_key is not None:
-                old = shortcuts.get(found_key) or {}
+            if keep is not None:
+                old = shortcuts.get(keep) or {}
                 if isinstance(old.get("tags"), dict):
                     entry["tags"] = old["tags"]
-                shortcuts[found_key] = entry
+                shortcuts[keep] = entry
                 updated += 1
             else:
                 shortcuts[_next_index(shortcuts)] = entry
                 added += 1
             sc.write_bytes(_write_map(data))
-            _write_grid_art(sc.parent, exe_path, app_name, icon_path)
+            _write_grid_art(sc.parent, exe_path, app_name, art)
             touched += 1
     if not touched:
         return False, "no_userdata"
@@ -271,31 +355,13 @@ def _upsert_vdf(
     return True, "updated" if updated else "added"
 
 
-def _add_via_steamos(exe_path: str) -> Optional[bool]:
-    from shutil import which
-    helper = which("steamos-add-to-steam")
-    if not helper:
-        return None
-    try:
-        r = subprocess.run([helper, exe_path], capture_output=True, text=True, timeout=60, check=False)
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
 def add_to_steam(app_name: str = APP_NAME) -> Tuple[bool, str]:
+    """只走 VDF upsert。不再先调 steamos-add-to-steam（它会用 AppImage 文件名命名）。"""
     app_name = (app_name or APP_NAME).strip() or APP_NAME
     try:
         exe_path, start_dir = detect_launch_target()
     except Exception as e:
         return False, f"no_target:{e}"
-    icon_path = detect_icon_path()
-    via = _add_via_steamos(exe_path)
-    ok, code = _upsert_vdf(exe_path, start_dir, app_name=app_name, icon_path=icon_path)
-    if ok:
-        return True, code
-    if via is True:
-        return True, "steamos_ok"
-    if via is False:
-        return False, code if code != "steam_not_found" else "steamos_failed"
-    return False, code
+    art = detect_steam_art()
+    icon_path = detect_icon_path() or art.get("logo") or ""
+    return _upsert_vdf(exe_path, start_dir, app_name=app_name, icon_path=icon_path, art=art)
