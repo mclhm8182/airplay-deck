@@ -252,6 +252,143 @@ echo "[build] 瘦身：剥离 .so 调试符号…"
 find "$PYSIDE_LIB" -type f -name '*.so*' -exec strip --strip-unneeded {} \; 2>/dev/null || true
 find AppDir/usr/lib -type f -name '*.so*' -exec strip --strip-unneeded {} \; 2>/dev/null || true
 
+# 5) 把 Qt xcb 平台插件需要的系统库打进 AppImage。
+# Steam Deck 通常自带这些库，但 appimage.github.io 目录测试环境没有：
+#   libqxcb.so 直接依赖 libxkbcommon-x11.so.0；
+#   Qt 6.5+ 还会在运行时 dlopen libxcb-cursor（ldd 看不到）。
+# 不打包 AppImage excludelist 禁止的 glibc / libGL / libX11 / libxcb.so.1 等核心库。
+echo "[build] 打包 Qt xcb / xkb 运行库…"
+DEST_LIB="AppDir/usr/lib"
+mkdir -p "$DEST_LIB"
+
+# 与 https://raw.githubusercontent.com/AppImageCommunity/pkg2appimage/master/excludelist
+# 对齐：这些必须由宿主提供，打进去会和系统驱动/glibc 冲突。
+is_excluded_lib() {
+  local b
+  b="$(basename "$1")"
+  case "$b" in
+    ld-linux.so.2|ld-linux-x86-64.so.2|libanl.so.1|libBrokenLocale.so.1|libcidn.so.1|\
+    libc.so.6|libdl.so.2|libm.so.6|libmvec.so.1|libpthread.so.0|\
+    libresolv.so.2|librt.so.1|libthread_db.so.1|libutil.so.1|\
+    libnss_compat.so.2|libnss_dns.so.2|libnss_files.so.2|libnss_hesiod.so.2|\
+    libnss_nis.so.2|libnss_nisplus.so.2|\
+    libstdc++.so.6|libgcc_s.so.1|\
+    libGL.so.1|libEGL.so.1|libGLdispatch.so.0|libGLX.so.0|libOpenGL.so.0|\
+    libdrm.so.2|libglapi.so.0|libgbm.so.1|\
+    libxcb.so.1|libX11.so.6|libX11-xcb.so.1|libwayland-client.so.0|\
+    libxcb-dri3.so.0|libxcb-dri2.so.0|\
+    libfontconfig.so.1|libfreetype.so.6|libharfbuzz.so.0|\
+    libICE.so.6|libSM.so.6|libz.so.1|libuuid.so.1|libexpat.so.1|\
+    libcom_err.so.2|libgpg-error.so.0|libasound.so.2|libusb-1.0.so.0|\
+    libjack.so.0|libpipewire-0.3.so.0|libfribidi.so.0|libgmp.so.10)
+      return 0 ;;
+  esac
+  return 1
+}
+
+find_host_lib() {
+  local name="$1" p
+  for p in /usr/lib/x86_64-linux-gnu/"$name" /lib/x86_64-linux-gnu/"$name" /usr/lib/"$name"; do
+    if [ -e "$p" ]; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 复制真实 .so，并按原 soname 在 AppDir 里建好符号链接（避免把指向宿主的 symlink 原样拷进去）。
+copy_shared_lib() {
+  local src="$1" real base soname
+  [ -e "$src" ] || return 1
+  real="$(readlink -f "$src")"
+  [ -f "$real" ] || return 1
+  base="$(basename "$real")"
+  soname="$(basename "$src")"
+  if is_excluded_lib "$soname" || is_excluded_lib "$base"; then
+    return 0
+  fi
+  if [ ! -e "$DEST_LIB/$base" ]; then
+    cp -f "$real" "$DEST_LIB/$base"
+    chmod 755 "$DEST_LIB/$base" 2>/dev/null || true
+    strip --strip-unneeded "$DEST_LIB/$base" 2>/dev/null || true
+  fi
+  if [ "$soname" != "$base" ] && [ ! -e "$DEST_LIB/$soname" ]; then
+    ln -sfn "$base" "$DEST_LIB/$soname"
+  fi
+}
+
+# libxcb-cursor 常被 Qt 运行时 dlopen，必须显式列入，不能只靠 ldd。
+REQUIRED_XCB_LIBS="
+  libxkbcommon.so.0
+  libxkbcommon-x11.so.0
+  libxcb-cursor.so.0
+  libxcb-icccm.so.4
+  libxcb-image.so.0
+  libxcb-keysyms.so.1
+  libxcb-render-util.so.0
+  libxcb-randr.so.0
+  libxcb-shape.so.0
+  libxcb-xinerama.so.0
+  libxcb-xkb.so.1
+  libxcb-shm.so.0
+  libxcb-sync.so.1
+  libxcb-xfixes.so.0
+  libxcb-render.so.0
+  libxcb-util.so.1
+"
+
+missing_xcb=0
+for name in $REQUIRED_XCB_LIBS; do
+  if src="$(find_host_lib "$name")"; then
+    copy_shared_lib "$src"
+    echo "[build]   + $name  ←  $src"
+  else
+    echo "[build] ✗ 构建环境缺少 $name"
+    missing_xcb=1
+  fi
+done
+if [ "$missing_xcb" -ne 0 ]; then
+  echo "[build] 请在构建环境安装："
+  echo "        sudo apt install -y libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0"
+  echo "          libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0"
+  echo "          libxcb-randr0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1"
+  echo "          libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-render0 libxcb-util1"
+  exit 1
+fi
+
+# 再扫 libqxcb / libQt6XcbQpa 以及刚拷进来的库的 ldd 依赖，补上间接依赖（跳过 excludelist）。
+bundle_ldd_deps() {
+  local so dep notfound
+  for so in "$@"; do
+    [ -e "$so" ] || continue
+    while IFS= read -r line; do
+      if echo "$line" | grep -q 'not found'; then
+        notfound="$(echo "$line" | awk '{print $1}')"
+        # 缺的若已在 AppDir 里，ldd 在构建机上可能仍显示 not found，可忽略
+        if [ -e "$DEST_LIB/$notfound" ]; then
+          continue
+        fi
+        echo "[build] ⚠ ldd 找不到 $(basename "$so") 的依赖：$notfound"
+        continue
+      fi
+      dep="$(echo "$line" | awk '/=>/ && $3 ~ /^\// {print $3}')"
+      [ -n "$dep" ] || continue
+      is_excluded_lib "$(basename "$dep")" && continue
+      copy_shared_lib "$dep"
+    done < <(ldd "$so" 2>/dev/null || true)
+  done
+}
+
+QXCB_SO="$(find "$PYSIDE_LIB" -type f -name 'libqxcb.so' | head -n1 || true)"
+XCBQPA_SO="$(find "$QT_LIB_DIR" -maxdepth 1 \( -type f -o -type l \) -name 'libQt6XcbQpa.so*' | head -n1 || true)"
+bundle_ldd_deps "$QXCB_SO" "$XCBQPA_SO" "$DEST_LIB"/libxkbcommon*.so* "$DEST_LIB"/libxcb-*.so*
+# 多扫一轮，消化新拷进来的间接依赖
+bundle_ldd_deps "$DEST_LIB"/libxkbcommon*.so* "$DEST_LIB"/libxcb-*.so*
+
+echo "[build] 已打进 AppDir/usr/lib 的 xcb/xkb 库："
+ls -l "$DEST_LIB"/libxkbcommon*.so* "$DEST_LIB"/libxcb-*.so* 2>/dev/null || true
+
 # 应用代码
 cp -f airplay-deck.py            AppDir/opt/airplay-deck/
 cp -rf core                      AppDir/opt/airplay-deck/
