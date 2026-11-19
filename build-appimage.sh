@@ -371,11 +371,12 @@ fi
 # ---------------------------------------------------------------------------
 echo "[build] 运行 appimagetool 生成 AppImage…"
 OUTPUT_APPIMAGE="$HERE/AirPlayDeck-${VERSION}-x86_64.AppImage"
-# 若 appimagetool 支持 --comp，则用 xz 进一步减小体积（不支持则忽略）。
-# 注意：只能填 gzip 或 xz——该版本明确只支持这两种，填 zstd 会直接报错退出。
+# 若 appimagetool 支持 --comp，则用 gzip（zlib）。
+# AppImageKit 版 appimagetool 只支持 gzip 或 xz，填 zstd 会直接报错退出。
+# 不用 xz：appimage.github.io 目录测试用的旧 runtime 只支持 zlib/zstd，xz 会挂载失败。
 COMP_FLAG=""
 if $APPIMAGETOOL --help 2>&1 | grep -q -- '--comp'; then
-  COMP_FLAG="--comp xz"
+  COMP_FLAG="--comp gzip"
 fi
 $APPIMAGETOOL $COMP_FLAG "$HERE/AppDir" "$OUTPUT_APPIMAGE" \
   || { echo "[build] appimagetool 失败。常见原因：缺少 file/patchelf（sudo apt install -y file patchelf）或 libfuse2（sudo apt install -y libfuse2）"; exit 1; }
